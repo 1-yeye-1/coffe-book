@@ -1,0 +1,12 @@
+{
+  "name": "coffee-book-platform",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "node front/server.js",
+    "dev:server": "node backend/index.js",
+    "dev:front": "node front/server.js",
+    "start:server": "node backend/index.js",
+    "start:front": "node front/server.js"
+  }
+}
