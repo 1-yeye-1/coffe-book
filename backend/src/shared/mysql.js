@@ -6,7 +6,7 @@ const config = {
   host: process.env.DB_HOST || "127.0.0.1",
   port: Number(process.env.DB_PORT || 3306),
   user: process.env.DB_USER || "dev",
-  password: process.env.DB_PASSWORD || "ygyybpkn666",
+  password: process.env.DB_PASSWORD || "",
   database: process.env.DB_NAME || "coffee_book"
 };
 
@@ -31,6 +31,10 @@ function formatDateTime(value) {
 }
 
 async function initDatabase() {
+  if (process.env.NODE_ENV === "production" && !process.env.DB_PASSWORD) {
+    throw new Error("Production must configure DB_PASSWORD in backend/.env or environment variables");
+  }
+
   const bootstrap = await mysql.createConnection({
     host: config.host,
     port: config.port,

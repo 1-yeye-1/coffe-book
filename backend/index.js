@@ -1,4 +1,8 @@
 const http = require("http");
+const { loadEnv } = require("./src/shared/env");
+
+loadEnv();
+
 const { handleFrontApi } = require("./src/client-routes");
 const { handleAdminApi } = require("./src/admin-routes");
 const { ok, fail } = require("./src/shared/response");

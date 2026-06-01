@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "node scripts/dev.js",
     "build": "vite build",
+    "test": "npm run build",
+    "lint": "node ../scripts/lint.js",
     "preview": "vite preview --host localhost",
     "legacy": "node server.js"
   },

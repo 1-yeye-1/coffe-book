@@ -51,14 +51,23 @@ npm run dev
 
 ## MySQL 配置
 
-后端默认连接：
+后端会优先读取 `backend/.env`，请先复制示例文件并填写本地数据库密码：
+
+```bash
+cd backend
+copy .env.example .env
+```
+
+核心配置项：
 
 ```text
-host: 127.0.0.1
-port: 3306
-user: dev
-password: ygyybpkn666
-database: coffee_book
+PORT=4173
+JWT_SECRET=replace-with-a-long-random-secret
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=dev
+DB_PASSWORD=your-mysql-password
+DB_NAME=coffee_book
 ```
 
 首次运行 `node index.js` 时，后端会自动创建 `coffee_book` 数据库、创建业务表，并写入初始化演示数据。
@@ -67,10 +76,97 @@ database: coffee_book
 
 ```text
 NODE_ENV=production
+JWT_SECRET=至少 32 位随机字符串
+DB_PASSWORD=生产数据库密码
 REDIS_URL=redis://your-redis-host:6379
 ```
 
 如果 `NODE_ENV=production` 但没有配置 `REDIS_URL`，后端会拒绝启动，避免验证码落到内存存储。
+
+## 常用工程命令
+
+安装依赖：
+
+```bash
+npm install
+cd front && npm install
+cd ../backend && npm install
+```
+
+回到项目根目录后：
+
+```bash
+npm run dev      # 同时启动后端和前端
+npm run build    # 前端生产构建
+npm run lint     # package/json、后端与脚本语法、冲突标记检查
+npm run test     # 后端核心接口冒烟测试
+```
+
+前端单独启动：
+
+```bash
+cd front
+npm run dev
+```
+
+后端单独启动：
+
+```bash
+cd backend
+npm run dev
+```
+
+## 核心接口说明
+
+用户端接口：
+
+```text
+GET    /api
+GET    /api/home
+GET    /api/products
+GET    /api/books
+GET    /api/seats/status?date=YYYY-MM-DD&time=HH:mm
+GET    /api/activities
+GET    /api/posts
+POST   /api/auth/sms-code
+POST   /api/auth/register
+POST   /api/auth/login
+POST   /api/auth/sms-login
+GET    /api/member
+PATCH  /api/member/profile
+PATCH  /api/member/security
+PATCH  /api/member/password
+POST   /api/cart
+POST   /api/orders
+POST   /api/orders/:id/pay
+POST   /api/reservations
+POST   /api/activities/:id/apply
+POST   /api/posts
+POST   /api/posts/:id/comments
+POST   /api/posts/:id/like
+```
+
+后台接口需要管理员 Token：
+
+```text
+POST   /api/admin/login
+GET    /api/admin/summary
+GET    /api/admin/realtime
+POST   /api/admin/users
+PATCH  /api/admin/users/:id
+DELETE /api/admin/users/:id
+POST   /api/admin/products
+PATCH  /api/admin/products/:id
+DELETE /api/admin/products/:id
+POST   /api/admin/orders
+PATCH  /api/admin/orders/:id
+PATCH  /api/admin/orders/:id/payment-review
+POST   /api/admin/reservations
+PATCH  /api/admin/reservations/:id
+POST   /api/admin/activities
+PATCH  /api/admin/activities/:id
+PATCH  /api/admin/posts/:postId/comments/:commentId
+```
 
 ## 目录结构
 
