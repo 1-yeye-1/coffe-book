@@ -17,6 +17,11 @@ export const state = {
   selectedCommunityProfile: null,
   selectedActivityId: 1,
   cart: JSON.parse(localStorage.getItem("coffee_cart") || "[]"),
+  selectedCartIds: [],
+  checkoutItems: [],
+  checkoutCartIds: [],
+  checkoutDraft: null,
+  selectedOrderId: null,
   pendingReservation: null,
   pendingCheckout: null,
   lastOrder: null

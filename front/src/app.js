@@ -10,7 +10,8 @@ import { renderProductList, bindProductList } from "./client/creative-shop.js";
 import { renderCart, bindCart } from "./client/shopping-cart.js";
 import { renderOrderConfirm, bindOrderConfirm } from "./client/payment-flow/order-confirmation.js";
 import { renderPayment, bindPayment } from "./client/payment-flow/payment.js";
-import { renderPaymentResult } from "./client/payment-flow/payment-result.js";
+import { renderPaymentResult, bindPaymentResult } from "./client/payment-flow/payment-result.js";
+import { renderOrderDetail, bindOrderDetail } from "./client/order-detail.js";
 import { renderSeatSelect, bindSeatSelect } from "./client/reservations/seat-selection.js";
 import { renderReservationConfirm, bindReservationConfirm } from "./client/reservations/reservation-confirmation.js";
 import { renderMyReservations } from "./client/reservations/my-reservations.js";
@@ -62,7 +63,8 @@ const routes = {
   cart: { render: renderCart, bind: bindCart, auth: true },
   orderConfirm: { render: renderOrderConfirm, bind: bindOrderConfirm, auth: true },
   payment: { render: renderPayment, bind: bindPayment, auth: true },
-  paymentResult: { render: renderPaymentResult },
+  paymentResult: { render: renderPaymentResult, bind: bindPaymentResult, auth: true },
+  orderDetail: { render: renderOrderDetail, bind: bindOrderDetail, auth: true },
   reservation: { render: renderSeatSelect, bind: bindSeatSelect },
   reservationConfirm: { render: renderReservationConfirm, bind: bindReservationConfirm },
   myReservations: { render: renderMyReservations, auth: true },
@@ -99,8 +101,36 @@ const routes = {
 };
 
 const defaultPage = window.COFFEE_BOOK_ENTRY === "admin" ? (state.adminToken ? "adminWorkbench" : "adminLogin") : "home";
-state.page = window.history.state?.page || defaultPage;
-window.history.replaceState({ page: state.page }, "");
+
+function routeFromPath(pathname) {
+  if (pathname === "/checkout") return { page: "orderConfirm" };
+  if (pathname === "/orders") return { page: "myOrders" };
+  const paymentMatch = pathname.match(/^\/payment\/([^/]+)$/);
+  if (paymentMatch) return { page: "payment", selectedOrderId: paymentMatch[1] };
+  const successMatch = pathname.match(/^\/payment-success\/([^/]+)$/);
+  if (successMatch) return { page: "paymentResult", selectedOrderId: successMatch[1] };
+  const orderMatch = pathname.match(/^\/orders\/([^/]+)$/);
+  if (orderMatch) return { page: "orderDetail", selectedOrderId: orderMatch[1] };
+  return null;
+}
+
+function pathFromPage(page) {
+  if (page === "orderConfirm") return "/checkout";
+  if (page === "payment" && state.selectedOrderId) return `/payment/${state.selectedOrderId}`;
+  if (page === "paymentResult" && state.selectedOrderId) return `/payment-success/${state.selectedOrderId}`;
+  if (page === "myOrders") return "/orders";
+  if (page === "orderDetail" && state.selectedOrderId) return `/orders/${state.selectedOrderId}`;
+  return "/";
+}
+
+const pathRoute = routeFromPath(window.location.pathname);
+if (pathRoute) {
+  state.page = pathRoute.page;
+  state.selectedOrderId = pathRoute.selectedOrderId || state.selectedOrderId;
+} else {
+  state.page = window.history.state?.page || defaultPage;
+}
+window.history.replaceState({ page: state.page, selectedOrderId: state.selectedOrderId }, "", pathFromPage(state.page));
 
 async function loadData() {
   const [home, products, books, seats, posts, activities, dashboard] = await Promise.all([
@@ -142,7 +172,7 @@ function makeContext() {
     render,
     setPage: (page) => {
       setPage(page);
-      window.history.pushState({ page }, "");
+      window.history.pushState({ page, selectedOrderId: state.selectedOrderId }, "", pathFromPage(page));
       render();
       window.scrollTo({ top: 0, behavior: "smooth" });
     },
@@ -180,7 +210,9 @@ async function render() {
 }
 
 window.addEventListener("popstate", (event) => {
-  setPage(event.state?.page || defaultPage);
+  const pathRoute = routeFromPath(window.location.pathname);
+  setPage(pathRoute?.page || event.state?.page || defaultPage);
+  state.selectedOrderId = pathRoute?.selectedOrderId || event.state?.selectedOrderId || state.selectedOrderId;
   render();
 });
 

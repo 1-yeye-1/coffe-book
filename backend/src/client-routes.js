@@ -1,4 +1,4 @@
-const { ok, fail } = require("./shared/response");
+const { corsOrigin, ok, fail } = require("./shared/response");
 const { parseBody } = require("./shared/request-body");
 const { clearLoginFailures, currentUser, loginAllowed, publicUser, recordLoginFailure, sign } = require("./shared/auth");
 const { hashPassword, needsUpgrade, verifyPassword } = require("./shared/password");
@@ -6,6 +6,7 @@ const { dashboardData, db, homeData, recordRealtime, seatStatus, today } = requi
 const {
   persistActivity,
   persistActivityApplication,
+  persistAuditLog,
   persistCartItem,
   persistComment,
   persistOrder,
@@ -14,7 +15,7 @@ const {
   persistReservation,
   persistUser
 } = require("./shared/mysql");
-const { createCaptcha, createSmsCode, verifyCaptcha, verifySmsCode } = require("./shared/verification-store");
+const { createCaptcha, createSliderChallenge, createSmsCode, verifyCaptcha, verifySliderChallenge, verifySmsCode } = require("./shared/verification-store");
 const QRCode = require("qrcode");
 
 function nextId(items) {
@@ -22,7 +23,27 @@ function nextId(items) {
 }
 
 function validPhone(phone) {
-  return /^\d{11}$/.test(String(phone || "").trim());
+  return /^1[3-9]\d{9}$/.test(String(phone || "").trim());
+}
+
+function validEmail(email) {
+  const value = String(email || "").trim();
+  return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function validBirthday(birthday) {
+  const value = String(birthday || "").trim();
+  if (!value) return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day && value <= today();
+}
+
+async function auditActivity(action, options = {}) {
+  const entry = recordRealtime(action, options);
+  await persistAuditLog(entry);
+  return entry;
 }
 
 function validStrongPassword(password) {
@@ -90,14 +111,57 @@ function publicPost(post, viewer) {
   };
 }
 
-const memberLevels = [
-  { name: "普通会员", min: 0, next: 500, benefits: ["每日签到 +10 积分", "文创商品 95 折券兑换", "活动报名提醒"] },
-  { name: "黄金会员", min: 500, next: 1500, benefits: ["每日签到 +15 积分", "文创商品 9 折券兑换", "活动优先报名", "生日咖啡券"] },
-  { name: "钻石会员", min: 1500, next: null, benefits: ["每日签到 +20 积分", "文创商品 85 折券兑换", "活动专属名额", "每月精品咖啡体验"] }
+const memberLevelDefinitions = [
+  {
+    name: "普通会员",
+    min: 0,
+    next: 500,
+    benefits: [
+      { key: "check-in", label: "每日签到 +10 积分" },
+      { key: "shop-discount", label: "文创商品 95 折券兑换" },
+      { key: "event-reminder", label: "活动报名提醒" }
+    ]
+  },
+  {
+    name: "黄金会员",
+    min: 500,
+    next: 1500,
+    benefits: [
+      { key: "check-in", label: "每日签到提升至 +15 积分" },
+      { key: "shop-discount", label: "文创商品折扣提升至 9 折" },
+      { key: "event-priority", label: "活动优先报名" },
+      { key: "birthday-coffee", label: "生日咖啡券" }
+    ]
+  },
+  {
+    name: "钻石会员",
+    min: 1500,
+    next: null,
+    benefits: [
+      { key: "check-in", label: "每日签到提升至 +20 积分" },
+      { key: "shop-discount", label: "文创商品折扣提升至 85 折" },
+      { key: "event-quota", label: "活动专属名额" },
+      { key: "monthly-coffee", label: "每月精品咖啡体验" }
+    ]
+  }
 ];
 
+const memberLevels = memberLevelDefinitions.map((level, index) => {
+  const inheritedBenefits = new Map();
+  for (const item of memberLevelDefinitions.slice(0, index + 1)) {
+    for (const benefit of item.benefits) inheritedBenefits.set(benefit.key, benefit.label);
+  }
+  return {
+    name: level.name,
+    min: level.min,
+    next: level.next,
+    inheritedFrom: memberLevelDefinitions.slice(0, index).map((item) => item.name),
+    benefits: [...inheritedBenefits.values()]
+  };
+});
+
 const pointRewards = [
-  { id: "coffee-coupon", title: "精品咖啡兑换券", cost: 300, desc: "可兑换任意标准杯饮品 .gitignore 杯", type: "饮品券" },
+  { id: "coffee-coupon", title: "精品咖啡兑换券", cost: 300, desc: "可兑换任意标准杯饮品 1 杯", type: "饮品券" },
   { id: "shop-10", title: "文创商城 10 元优惠券", cost: 500, desc: "满 59 元可用", type: "优惠券" },
   { id: "event-priority", title: "活动优先报名券", cost: 800, desc: "热门活动开放前优先锁定名额", type: "活动券" }
 ];
@@ -143,6 +207,7 @@ function earlySignupQuota(user) {
 
 function memberData(user) {
   normalizeMember(user);
+  const comments = db.posts.flatMap((post) => post.comments || []).filter((comment) => comment.userId === user.id);
   return {
     ...publicUser(user),
     reservations: db.reservations.filter((item) => item.userId === user.id),
@@ -151,6 +216,11 @@ function memberData(user) {
     notes: user.notes,
     notifications: user.notifications,
     gifts: user.gifts,
+    stats: {
+      favoriteBooks: user.favorites.length,
+      publishedComments: comments.length,
+      orderCount: db.orders.filter((item) => item.userId === user.id).length
+    },
     membership: membershipData(user)
   };
 }
@@ -164,7 +234,8 @@ async function handleFrontApi(req, res, url) {
     const svg = await QRCode.toString(data, { type: "svg", margin: 2, width: 260, errorCorrectionLevel: "M" });
     res.writeHead(200, {
       "Content-Type": "image/svg+xml; charset=utf-8",
-      "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || "http://localhost:5173",
+      "Access-Control-Allow-Origin": corsOrigin(res),
+      "Vary": "Origin",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff"
     });
@@ -172,6 +243,7 @@ async function handleFrontApi(req, res, url) {
     return;
   }
   if (method === "GET" && url.pathname === "/api/auth/captcha") return ok(res, await createCaptcha());
+  if (method === "GET" && url.pathname === "/api/auth/slider") return ok(res, await createSliderChallenge());
   if (method === "GET" && url.pathname === "/api/home") return ok(res, homeData());
   if (method === "GET" && url.pathname === "/api/products") return ok(res, db.products);
   if (method === "GET" && url.pathname.startsWith("/api/products/")) {
@@ -207,13 +279,23 @@ async function handleFrontApi(req, res, url) {
     const user = currentUser(req);
     return user ? ok(res, memberData(user)) : fail(res, 401, "请先登录");
   }
+  if (method === "GET" && url.pathname.match(/^\/api\/orders\/\d+\/payment-status$/)) {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再查询支付状态");
+    const id = Number(url.pathname.split("/")[3]);
+    const order = db.orders.find((item) => item.id === id);
+    if (!order) return fail(res, 404, "订单不存在");
+    if (order.userId !== user.id) return fail(res, 403, "不能查询其他用户的订单");
+    return ok(res, order);
+  }
 
   const body = await parseBody(req);
 
   if (method === "POST" && url.pathname === "/api/auth/sms-code") {
     if (!validPhone(body.phone)) return fail(res, 400, "请输入正确的手机号");
     const captchaPassed = await verifyCaptcha(body.captchaToken, body.captchaAnswer);
-    if (!captchaPassed) return fail(res, 400, "图形验证码错误或已过期");
+    const sliderPassed = await verifySliderChallenge(body.sliderToken, body.sliderValue);
+    if (!captchaPassed && !sliderPassed) return fail(res, 400, "请先完成验证码校验");
     try {
       const result = await createSmsCode(body.phone);
       return ok(res, result, "验证码已发送");
@@ -240,6 +322,12 @@ async function handleFrontApi(req, res, url) {
       level: "普通会员",
       points: 100,
       avatar: "",
+      email: "",
+      birthday: "",
+      bio: "",
+      coffeePreference: "",
+      bookPreference: "",
+      address: "",
       showProfile: true,
       levelProgress: 80,
       lastCheckIn: "",
@@ -250,18 +338,18 @@ async function handleFrontApi(req, res, url) {
     };
     await persistUser(user);
     db.users.push(user);
-    recordRealtime(`新会员 ${user.name} 完成注册`);
+    await auditActivity("注册账号", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "user", targetId: user.id, detail: `新会员 ${user.name} 完成注册` });
     return ok(res, { user: publicUser(user), token: sign({ id: user.id, type: "user" }) }, "注册成功");
   }
 
   if (method === "POST" && url.pathname === "/api/auth/login") {
     const attemptKey = `user:${String(body.phone || "").trim()}`;
     if (!loginAllowed(attemptKey)) return fail(res, 429, "登录失败次数过多，请稍后再试");
+    if (!validPhone(body.phone) || !String(body.password || "").trim()) return fail(res, 400, "手机号或密码格式不正确");
     const user = db.users.find((item) => item.phone === body.phone);
-    if (!user) return fail(res, 404, "账号不存在，请先注册");
-    if (!verifyPassword(body.password, user.password)) {
+    if (!user || !verifyPassword(body.password, user.password)) {
       recordLoginFailure(attemptKey);
-      return fail(res, 401, "密码输入错误，请重新输入");
+      return fail(res, 401, "手机号或密码不正确");
     }
     clearLoginFailures(attemptKey);
     if (needsUpgrade(user.password)) {
@@ -284,7 +372,12 @@ async function handleFrontApi(req, res, url) {
     if (!user) return fail(res, 401, "请先登录");
     if (!body.name || !body.phone) return fail(res, 400, "昵称和手机号必填");
     if (!validPhone(body.phone)) return fail(res, 400, "请输入正确的手机号");
-    if (String(body.name).trim().length > 30) return fail(res, 400, "昵称不能超过 30 个字符");
+    if (!validEmail(body.email)) return fail(res, 400, "请输入正确的邮箱地址");
+    if (!validBirthday(body.birthday)) return fail(res, 400, "生日必须是有效且不晚于今天的日期");
+    if (String(body.name).trim().length < 2 || String(body.name).trim().length > 30) return fail(res, 400, "昵称需为 2 到 30 个字符");
+    if (String(body.bio || "").length > 200) return fail(res, 400, "个人简介不能超过 200 个字符");
+    if (String(body.coffeePreference || "").length > 60 || String(body.bookPreference || "").length > 60) return fail(res, 400, "偏好设置不能超过 60 个字符");
+    if (String(body.address || "").length > 160) return fail(res, 400, "收货地址不能超过 160 个字符");
     if (String(body.avatar || "").length > 1.5 * 1024 * 1024) return fail(res, 400, "头像图片过大");
     const duplicated = db.users.some((item) => item.id !== user.id && item.phone === body.phone);
     if (duplicated) return fail(res, 409, "该手机号已被其他账号使用");
@@ -297,8 +390,13 @@ async function handleFrontApi(req, res, url) {
     }
     user.name = String(body.name).trim();
     user.phone = String(body.phone).trim();
+    user.email = String(body.email || "").trim();
+    user.birthday = String(body.birthday || "").trim();
     user.avatar = avatar;
-    user.showProfile = body.showProfile === true || body.showProfile === "true" || body.showProfile === "on";
+    user.bio = String(body.bio || "").trim();
+    user.coffeePreference = String(body.coffeePreference || "").trim();
+    user.bookPreference = String(body.bookPreference || "").trim();
+    user.address = String(body.address || "").trim();
     await persistUser(user);
     for (const post of db.posts.filter((item) => item.userId === user.id)) {
       post.author = user.name;
@@ -312,7 +410,28 @@ async function handleFrontApi(req, res, url) {
         await persistComment(post.id, comment);
       }
     }
+    await auditActivity("更新个人资料", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "user", targetId: user.id, detail: "更新了个人资料" });
     return ok(res, publicUser(user), "个人资料已保存");
+  }
+
+  if (method === "PATCH" && url.pathname === "/api/member/security") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录");
+    user.showProfile = body.showProfile === true || body.showProfile === "true" || body.showProfile === "on";
+    await persistUser(user);
+    await auditActivity("更新安全设置", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "user", targetId: user.id, detail: `个人主页展示已${user.showProfile ? "开启" : "关闭"}` });
+    return ok(res, publicUser(user), "安全设置已保存");
+  }
+
+  if (method === "POST" && url.pathname === "/api/member/password") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录");
+    if (!verifyPassword(body.currentPassword, user.password)) return fail(res, 401, "当前密码不正确");
+    if (!validStrongPassword(body.newPassword)) return fail(res, 400, "新密码需为 8 到 32 位，并包含大写字母、小写字母、数字和特殊字符");
+    user.password = hashPassword(body.newPassword);
+    await persistUser(user);
+    await auditActivity("修改登录密码", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "user", targetId: user.id, detail: "更新了登录密码" });
+    return ok(res, null, "密码已修改");
   }
 
   if (method === "PATCH" && url.pathname === "/api/member/list") {
@@ -339,7 +458,7 @@ async function handleFrontApi(req, res, url) {
     normalizeMember(user);
     user.notifications = [`签到成功，获得 ${pointGain} 积分和 35 等级度`, ...(user.notifications || [])].slice(0, 30);
     await persistUser(user);
-    recordRealtime("会员完成每日签到");
+    await auditActivity("每日签到", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "user", targetId: user.id, detail: `完成每日签到，获得 ${pointGain} 积分` });
     return ok(res, memberData(user), "签到成功");
   }
 
@@ -363,7 +482,7 @@ async function handleFrontApi(req, res, url) {
     });
     user.notifications = [`已兑换：${reward.title}`, ...(user.notifications || [])].slice(0, 30);
     await persistUser(user);
-    recordRealtime(`会员积分兑换 ${reward.title}`);
+    await auditActivity("积分兑换", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "reward", targetId: reward.id, detail: `使用 ${reward.cost} 积分兑换 ${reward.title}` });
     return ok(res, memberData(user), "兑换成功");
   }
 
@@ -379,7 +498,7 @@ async function handleFrontApi(req, res, url) {
     gift.usedAt = new Date().toISOString();
     user.notifications = [`已使用：${gift.title}`, ...(user.notifications || [])].slice(0, 30);
     await persistUser(user);
-    recordRealtime(`会员使用 ${gift.title}`);
+    await auditActivity("使用礼券", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "gift", targetId: gift.id, detail: `使用礼券 ${gift.title}` });
     return ok(res, memberData(user), "礼券使用成功");
   }
 
@@ -390,9 +509,13 @@ async function handleFrontApi(req, res, url) {
     if (!product) return fail(res, 404, "商品不存在");
     const key = user.id;
     const quantity = Number(body.quantity || 1);
-    if (!validInteger(quantity, 1, 99)) return fail(res, 400, "商品数量必须是 .gitignore 到 99 之间的整数");
-    if (product.stock < quantity) return fail(res, 409, "商品库存不足");
+    if (product.stock < 1) return fail(res, 409, "商品已售罄");
+    if (!validInteger(quantity, 1, product.stock)) return fail(res, 400, `商品数量必须是 1 到 ${product.stock} 之间的整数`);
     const cart = db.carts.get(key) || [];
+    const currentQuantity = cart
+      .filter((item) => item.productId === product.id)
+      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    if (currentQuantity + quantity > product.stock) return fail(res, 409, `购物车中的该商品数量必须是 1 到 ${product.stock} 之间的整数`);
     cart.push({ productId: product.id, quantity });
     db.carts.set(key, cart);
     await persistCartItem(key, product.id, quantity);
@@ -410,15 +533,18 @@ async function handleFrontApi(req, res, url) {
       const product = db.products.find((productItem) => productItem.id === Number(item.productId));
       if (!product) return fail(res, 404, "商品不存在");
       const quantity = Number(item.quantity || 1);
-      if (!validInteger(quantity, 1, 99)) return fail(res, 400, "商品数量必须是 .gitignore 到 99 之间的整数");
+      if (!validInteger(quantity, 1, product.stock)) return fail(res, 400, `${product.name} 数量必须是 1 到 ${product.stock} 之间的整数`);
       quantities.set(product.id, Number(quantities.get(product.id) || 0) + quantity);
     }
     const orderItems = [...quantities.entries()].map(([productId, quantity]) => {
       const product = db.products.find((item) => item.id === productId);
       return { productId: product.id, name: product.name, price: product.price, quantity };
     });
-    if (orderItems.some((item) => item.quantity > 99)) return fail(res, 400, "同一商品数量不能超过 99 件");
-    if (orderItems.some((item) => db.products.find((product) => product.id === item.productId).stock < item.quantity)) return fail(res, 409, "库存不足");
+    const overStockItem = orderItems.find((item) => db.products.find((product) => product.id === item.productId).stock < item.quantity);
+    if (overStockItem) {
+      const product = db.products.find((item) => item.id === overStockItem.productId);
+      return fail(res, 409, `${product.name} 数量必须是 1 到 ${product.stock} 之间的整数`);
+    }
     for (const item of orderItems) {
       const product = db.products.find((productItem) => productItem.id === item.productId);
       product.stock -= item.quantity;
@@ -431,6 +557,10 @@ async function handleFrontApi(req, res, url) {
       items: orderItems,
       total,
       status: "待支付",
+      paymentReviewStatus: "not_submitted",
+      paymentSubmittedAt: "",
+      paymentReviewedAt: "",
+      paymentReviewedBy: 0,
       createdAt: new Date().toISOString(),
       earnedPoints: 0,
       earnedProgress: 0
@@ -441,7 +571,7 @@ async function handleFrontApi(req, res, url) {
       if (product) await persistProduct(product);
     }
     await persistOrder(order);
-    recordRealtime(`用户提交订单 #${order.id}`);
+    await auditActivity("提交订单", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "order", targetId: order.id, detail: `提交订单 #${order.id}，金额 ￥${total.toFixed(2)}` });
     return ok(res, order, "订单已创建，请完成支付");
   }
 
@@ -449,27 +579,21 @@ async function handleFrontApi(req, res, url) {
     const id = Number(url.pathname.split("/")[3]);
     const order = db.orders.find((item) => item.id === id);
     if (!order) return fail(res, 404, "订单不存在");
-    if (order.status === "已支付") return ok(res, order, "订单已经支付");
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再支付订单");
     if (order.userId && order.userId !== user.id) return fail(res, 403, "不能支付其他用户的订单");
-    order.status = "已支付";
+    if (order.status === "已取消") return fail(res, 409, "订单已取消，不能继续支付");
+    if (order.status === "已支付" || order.paymentReviewStatus === "approved") return ok(res, order, "订单已经支付");
+    if (order.paymentReviewStatus === "pending") return ok(res, order, "付款信息已提交，请等待后台审核");
+    order.status = "支付审核中";
     order.paymentMethod = body.paymentMethod || "线上支付";
-    order.paidAt = new Date().toISOString();
-    if (user) {
-      normalizeMember(user);
-      order.earnedPoints = Math.max(1, Math.floor(order.total));
-      order.earnedProgress = Math.max(1, Math.ceil(order.total * 0.5));
-      user.points += order.earnedPoints;
-      user.levelProgress += order.earnedProgress;
-      normalizeMember(user);
-      user.notifications = [`订单 #${order.id} 支付成功，获得 ${order.earnedPoints} 积分和 ${order.earnedProgress} 等级度`, ...(user.notifications || [])].slice(0, 30);
-      await persistUser(user);
-      order.user = publicUser(user);
-    }
+    order.paymentReviewStatus = "pending";
+    order.paymentSubmittedAt = new Date().toISOString();
+    order.paymentReviewedAt = "";
+    order.paymentReviewedBy = 0;
     await persistOrder(order);
-    recordRealtime(`订单 #${order.id} 完成支付`);
-    return ok(res, order, "支付成功");
+    await auditActivity("提交付款审核", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "order", targetId: order.id, detail: `订单 #${order.id} 已提交付款审核，支付方式：${order.paymentMethod}` });
+    return ok(res, order, "付款信息已提交，请等待后台审核");
   }
 
   if (method === "POST" && url.pathname === "/api/reservations") {
@@ -478,7 +602,7 @@ async function handleFrontApi(req, res, url) {
     const people = Number(body.people || 1);
     const phone = String(body.phone || "").trim();
     if (!validPhone(phone)) return fail(res, 400, "请填写正确的预留手机号");
-    if (!validInteger(people, 1, 20)) return fail(res, 400, "预约人数必须是 .gitignore 到 20 之间的整数");
+    if (!validInteger(people, 1, 20)) return fail(res, 400, "预约人数必须是 1 到 20 之间的整数");
     const seatIds = Array.isArray(body.seatIds) ? [...new Set(body.seatIds.map(String))] : String(body.seatId || "").split(",").filter(Boolean);
     if (seatIds.length < people) return fail(res, 400, `当前选择了 ${seatIds.length} 个座位，还需要选择 ${people - seatIds.length} 个座位`);
     if (seatIds.length > people) return fail(res, 400, `预约 ${people} 人只能选择 ${people} 个座位`);
@@ -501,7 +625,7 @@ async function handleFrontApi(req, res, url) {
     };
     db.reservations.push(reservation);
     await persistReservation(reservation);
-    recordRealtime(`用户完成 ${reservation.seatId} 座位预约`);
+    await auditActivity("预约座位", { actorType: user ? "user" : "guest", actorId: user?.id || 0, actorName: user?.name || phone, targetType: "reservation", targetId: reservation.id, detail: `完成 ${reservation.seatId} 座位预约` });
     return ok(res, reservation, "预约成功");
   }
 
@@ -526,7 +650,7 @@ async function handleFrontApi(req, res, url) {
     const phone = String(user?.phone || body.phone || "").trim();
     const people = Number(body.people || 1);
     if (!validPhone(phone)) return fail(res, 400, "未登录报名请填写正确的手机号");
-    if (!validInteger(people, 1, 20)) return fail(res, 400, "报名人数必须是 .gitignore 到 20 之间的整数");
+    if (!validInteger(people, 1, 20)) return fail(res, 400, "报名人数必须是 1 到 20 之间的整数");
     const now = Date.now();
     if (kind === "regular" && activity.registrationStart && now < asTime(activity.registrationStart)) {
       return fail(res, 409, `直接报名将于 ${activity.registrationStart} 开放`);
@@ -546,7 +670,7 @@ async function handleFrontApi(req, res, url) {
     activity.applied += people;
     await persistActivity(activity);
     await persistActivityApplication(application);
-    recordRealtime(`${activity.title} 新增 ${people} 人报名`);
+    await auditActivity("活动报名", { actorType: user ? "user" : "guest", actorId: user?.id || 0, actorName: user?.name || phone, targetType: "activity", targetId: activity.id, detail: `${activity.title} 新增 ${people} 人报名` });
     return ok(res, { activity, application }, kind === "early" ? "提前报名成功" : "报名成功");
   }
 
@@ -575,7 +699,7 @@ async function handleFrontApi(req, res, url) {
     };
     db.posts.unshift(post);
     await persistPost(post);
-    recordRealtime("书友社区新增动态");
+    await auditActivity("发布社区动态", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "post", targetId: post.id, detail: `发布动态《${post.title}》` });
     return ok(res, publicPost(post, user), "发布成功");
   }
 
@@ -591,7 +715,7 @@ async function handleFrontApi(req, res, url) {
     const comment = { id: nextId(allComments), userId: user.id, user: user.name, avatar: user.avatar || "", content: String(body.content).trim(), likes: 0, likedBy: [], status: "pending" };
     post.comments.push(comment);
     await persistComment(post.id, comment);
-    recordRealtime("书友社区新增待审核评论");
+    await auditActivity("提交评论", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "comment", targetId: comment.id, detail: `在动态 #${post.id} 下提交待审核评论` });
     return ok(res, publicPost(post, user), "评论已提交，审核通过后展示");
   }
 

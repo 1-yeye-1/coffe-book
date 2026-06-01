@@ -3,7 +3,7 @@ const { db } = require("./data");
 const { hashPassword } = require("./password");
 
 const config = {
-  host: process.env.DB_HOST || "127.0.0..gitignore",
+  host: process.env.DB_HOST || "127.0.0.1",
   port: Number(process.env.DB_PORT || 3306),
   user: process.env.DB_USER || "dev",
   password: process.env.DB_PASSWORD || "ygyybpkn666",
@@ -55,11 +55,17 @@ async function createTables() {
       id INT PRIMARY KEY AUTO_INCREMENT,
       name VARCHAR(100) NOT NULL,
       phone VARCHAR(30) NOT NULL UNIQUE,
+      email VARCHAR(160) NOT NULL DEFAULT '',
+      birthday DATE NULL,
       password VARCHAR(255) NOT NULL,
       role VARCHAR(30) NOT NULL,
       level VARCHAR(50) NOT NULL,
       points INT NOT NULL DEFAULT 0,
       avatar MEDIUMTEXT NULL,
+      bio TEXT NULL,
+      coffee_preference VARCHAR(100) NOT NULL DEFAULT '',
+      book_preference VARCHAR(100) NOT NULL DEFAULT '',
+      address TEXT NULL,
       profile_public TINYINT(1) NOT NULL DEFAULT 1,
       level_progress INT NOT NULL DEFAULT 0,
       last_checkin VARCHAR(20) NOT NULL DEFAULT '',
@@ -115,6 +121,12 @@ async function createTables() {
       status VARCHAR(30) NOT NULL,
       payment_method VARCHAR(40) NOT NULL DEFAULT '',
       paid_at DATETIME NULL,
+      payment_review_status VARCHAR(20) NOT NULL DEFAULT 'not_submitted',
+      payment_submitted_at DATETIME NULL,
+      payment_reviewed_at DATETIME NULL,
+      payment_reviewed_by INT NOT NULL DEFAULT 0,
+      earned_points INT NOT NULL DEFAULT 0,
+      earned_progress INT NOT NULL DEFAULT 0,
       created_at DATETIME NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS order_items (
@@ -180,6 +192,17 @@ async function createTables() {
       title VARCHAR(160) NOT NULL,
       summary TEXT NOT NULL,
       date DATETIME NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS audit_logs (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      actor_type VARCHAR(30) NOT NULL DEFAULT 'system',
+      actor_id INT NOT NULL DEFAULT 0,
+      actor_name VARCHAR(100) NOT NULL DEFAULT '',
+      action VARCHAR(100) NOT NULL,
+      target_type VARCHAR(60) NOT NULL DEFAULT '',
+      target_id VARCHAR(80) NOT NULL DEFAULT '',
+      detail TEXT NULL,
+      created_at DATETIME NOT NULL
     )`
   ];
 
@@ -212,7 +235,13 @@ async function ensureProductColumns() {
 async function ensureOrderColumns() {
   const columns = [
     "ADD COLUMN payment_method VARCHAR(40) NOT NULL DEFAULT '' AFTER status",
-    "ADD COLUMN paid_at DATETIME NULL AFTER payment_method"
+    "ADD COLUMN paid_at DATETIME NULL AFTER payment_method",
+    "ADD COLUMN payment_review_status VARCHAR(20) NOT NULL DEFAULT 'not_submitted' AFTER paid_at",
+    "ADD COLUMN payment_submitted_at DATETIME NULL AFTER payment_review_status",
+    "ADD COLUMN payment_reviewed_at DATETIME NULL AFTER payment_submitted_at",
+    "ADD COLUMN payment_reviewed_by INT NOT NULL DEFAULT 0 AFTER payment_reviewed_at",
+    "ADD COLUMN earned_points INT NOT NULL DEFAULT 0 AFTER payment_reviewed_by",
+    "ADD COLUMN earned_progress INT NOT NULL DEFAULT 0 AFTER earned_points"
   ];
   for (const column of columns) {
     try {
@@ -225,8 +254,14 @@ async function ensureOrderColumns() {
 
 async function ensureUserColumns() {
   const columns = [
+    "ADD COLUMN email VARCHAR(160) NOT NULL DEFAULT '' AFTER phone",
+    "ADD COLUMN birthday DATE NULL AFTER email",
     "ADD COLUMN avatar MEDIUMTEXT NULL",
-    "ADD COLUMN profile_public TINYINT(.gitignore) NOT NULL DEFAULT .gitignore",
+    "ADD COLUMN bio TEXT NULL AFTER avatar",
+    "ADD COLUMN coffee_preference VARCHAR(100) NOT NULL DEFAULT '' AFTER bio",
+    "ADD COLUMN book_preference VARCHAR(100) NOT NULL DEFAULT '' AFTER coffee_preference",
+    "ADD COLUMN address TEXT NULL AFTER book_preference",
+    "ADD COLUMN profile_public TINYINT(1) NOT NULL DEFAULT 1",
     "ADD COLUMN level_progress INT NOT NULL DEFAULT 0",
     "ADD COLUMN last_checkin VARCHAR(20) NOT NULL DEFAULT ''",
     "ADD COLUMN favorites TEXT NULL",
@@ -361,6 +396,9 @@ async function seedTables() {
   if (await countRows("notices") === 0) {
     for (const notice of db.notices) await persistNotice(notice);
   }
+  if (await countRows("audit_logs") === 0) {
+    for (const log of db.realtime) await persistAuditLog(log);
+  }
   for (const notice of db.notices) {
     await pool.execute("UPDATE notices SET date=? WHERE id=? AND TIME(date)='00:00:00'", [notice.date, notice.id]);
   }
@@ -378,7 +416,9 @@ async function loadTables() {
   const [activityApplications] = await pool.query("SELECT * FROM activity_applications ORDER BY id");
   const [posts] = await pool.query("SELECT * FROM posts ORDER BY id DESC");
   const [comments] = await pool.query("SELECT * FROM comments ORDER BY id");
+  const [carts] = await pool.query("SELECT * FROM carts ORDER BY id");
   const [notices] = await pool.query("SELECT * FROM notices ORDER BY date DESC, id DESC");
+  const [auditLogs] = await pool.query("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 100");
 
   db.users = users.map((item) => {
     const levelProgress = item.level_progress || progressFromLevel(item.level);
@@ -386,11 +426,17 @@ async function loadTables() {
       id: item.id,
       name: item.name,
       phone: item.phone,
+      email: item.email || "",
+      birthday: formatDate(item.birthday),
       password: item.password,
       role: item.role,
       level: item.level,
       points: item.points,
       avatar: item.avatar || "",
+      bio: item.bio || "",
+      coffeePreference: item.coffee_preference || "",
+      bookPreference: item.book_preference || "",
+      address: item.address || "",
       showProfile: Boolean(item.profile_public),
       levelProgress,
       lastCheckIn: item.last_checkin || "",
@@ -447,6 +493,12 @@ async function loadTables() {
     status: order.status,
     paymentMethod: order.payment_method || "",
     paidAt: formatDateTime(order.paid_at),
+    paymentReviewStatus: order.payment_review_status || "not_submitted",
+    paymentSubmittedAt: formatDateTime(order.payment_submitted_at),
+    paymentReviewedAt: formatDateTime(order.payment_reviewed_at),
+    paymentReviewedBy: order.payment_reviewed_by || 0,
+    earnedPoints: order.earned_points || 0,
+    earnedProgress: order.earned_progress || 0,
     createdAt: formatDateTime(order.created_at),
     items: orderItems
       .filter((item) => item.order_id === order.id)
@@ -473,6 +525,13 @@ async function loadTables() {
     kind: item.kind || "regular",
     createdAt: formatDateTime(item.created_at)
   }));
+  db.carts = new Map();
+  for (const item of carts) {
+    const key = String(item.user_key);
+    const entries = db.carts.get(key) || [];
+    entries.push({ productId: item.product_id, quantity: item.quantity, createdAt: formatDateTime(item.created_at) });
+    db.carts.set(key, entries);
+  }
   db.posts = posts.map((post) => {
     const userId = post.user_id || 0;
     const author = users.find((user) => user.id === userId);
@@ -492,6 +551,17 @@ async function loadTables() {
     };
   });
   db.notices = notices.map((item) => ({ id: item.id, title: item.title, summary: item.summary, date: formatDateTime(item.date) }));
+  db.realtime = auditLogs.map((item) => ({
+    id: item.id,
+    actorType: item.actor_type,
+    actorId: item.actor_id,
+    actorName: item.actor_name,
+    action: item.action,
+    targetType: item.target_type,
+    targetId: item.target_id,
+    detail: item.detail || item.action,
+    createdAt: formatDateTime(item.created_at)
+  }));
 }
 
 function parseList(value, fallback) {
@@ -513,18 +583,24 @@ function progressFromLevel(level) {
 async function persistUser(user) {
   if (!pool) return;
   await pool.execute(
-    `INSERT INTO users (id, name, phone, password, role, level, points, avatar, profile_public, level_progress, last_checkin, favorites, notes, notifications, gifts)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE name=VALUES(name), phone=VALUES(phone), password=VALUES(password), role=VALUES(role), level=VALUES(level), points=VALUES(points), avatar=VALUES(avatar), profile_public=VALUES(profile_public), level_progress=VALUES(level_progress), last_checkin=VALUES(last_checkin), favorites=VALUES(favorites), notes=VALUES(notes), notifications=VALUES(notifications), gifts=VALUES(gifts)`,
+    `INSERT INTO users (id, name, phone, email, birthday, password, role, level, points, avatar, bio, coffee_preference, book_preference, address, profile_public, level_progress, last_checkin, favorites, notes, notifications, gifts)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE name=VALUES(name), phone=VALUES(phone), email=VALUES(email), birthday=VALUES(birthday), password=VALUES(password), role=VALUES(role), level=VALUES(level), points=VALUES(points), avatar=VALUES(avatar), bio=VALUES(bio), coffee_preference=VALUES(coffee_preference), book_preference=VALUES(book_preference), address=VALUES(address), profile_public=VALUES(profile_public), level_progress=VALUES(level_progress), last_checkin=VALUES(last_checkin), favorites=VALUES(favorites), notes=VALUES(notes), notifications=VALUES(notifications), gifts=VALUES(gifts)`,
     [
       user.id,
       user.name,
       user.phone,
+      user.email || "",
+      user.birthday || null,
       user.password,
       user.role,
       user.level,
       user.points,
       user.avatar || "",
+      user.bio || "",
+      user.coffeePreference || "",
+      user.bookPreference || "",
+      user.address || "",
       user.showProfile === false ? 0 : 1,
       user.levelProgress || 0,
       user.lastCheckIn || "",
@@ -534,6 +610,30 @@ async function persistUser(user) {
       JSON.stringify(user.gifts || [])
     ]
   );
+}
+
+async function getDatabaseOverview() {
+  if (!pool) return [];
+  const [tables] = await pool.query("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=? ORDER BY TABLE_NAME", [config.database]);
+  const overview = [];
+  for (const { TABLE_NAME: tableName } of tables) {
+    const [countRows] = await pool.query(`SELECT COUNT(*) AS count FROM \`${tableName}\``);
+    const [columns] = await pool.query(
+      "SELECT COLUMN_NAME AS name, DATA_TYPE AS type, IS_NULLABLE AS nullable FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION",
+      [config.database, tableName]
+    );
+    overview.push({
+      table: tableName,
+      count: Number(countRows[0].count || 0),
+      columns: columns.map((column) => ({ name: column.name, type: column.type, nullable: column.nullable === "YES" }))
+    });
+  }
+  return overview;
+}
+
+async function reloadDatabase() {
+  if (!pool) return;
+  await loadTables();
 }
 
 async function persistReservation(reservation) {
@@ -569,10 +669,25 @@ async function persistBook(book) {
 async function persistOrder(order) {
   if (!pool) return;
   await pool.execute(
-    `INSERT INTO orders (id, user_id, user_name, total, status, payment_method, paid_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), user_name=VALUES(user_name), total=VALUES(total), status=VALUES(status), payment_method=VALUES(payment_method), paid_at=VALUES(paid_at), created_at=VALUES(created_at)`,
-    [order.id, order.userId, order.userName, order.total, order.status, order.paymentMethod || "", order.paidAt ? order.paidAt.slice(0, 19).replace("T", " ") : null, order.createdAt.slice(0, 19).replace("T", " ")]
+    `INSERT INTO orders (id, user_id, user_name, total, status, payment_method, paid_at, payment_review_status, payment_submitted_at, payment_reviewed_at, payment_reviewed_by, earned_points, earned_progress, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), user_name=VALUES(user_name), total=VALUES(total), status=VALUES(status), payment_method=VALUES(payment_method), paid_at=VALUES(paid_at), payment_review_status=VALUES(payment_review_status), payment_submitted_at=VALUES(payment_submitted_at), payment_reviewed_at=VALUES(payment_reviewed_at), payment_reviewed_by=VALUES(payment_reviewed_by), earned_points=VALUES(earned_points), earned_progress=VALUES(earned_progress), created_at=VALUES(created_at)`,
+    [
+      order.id,
+      order.userId,
+      order.userName,
+      order.total,
+      order.status,
+      order.paymentMethod || "",
+      order.paidAt ? order.paidAt.slice(0, 19).replace("T", " ") : null,
+      order.paymentReviewStatus || "not_submitted",
+      order.paymentSubmittedAt ? order.paymentSubmittedAt.slice(0, 19).replace("T", " ") : null,
+      order.paymentReviewedAt ? order.paymentReviewedAt.slice(0, 19).replace("T", " ") : null,
+      order.paymentReviewedBy || 0,
+      order.earnedPoints || 0,
+      order.earnedProgress || 0,
+      order.createdAt.slice(0, 19).replace("T", " ")
+    ]
   );
   await pool.execute("DELETE FROM order_items WHERE order_id=?", [order.id]);
   for (const item of order.items) {
@@ -635,6 +750,29 @@ async function persistNotice(notice) {
   );
 }
 
+async function persistAuditLog(log) {
+  if (!pool || !log) return;
+  const entry = typeof log === "string"
+    ? { actorType: "system", actorId: 0, actorName: "系统", action: "系统动态", targetType: "", targetId: "", detail: log, createdAt: log.slice(0, 19) }
+    : log;
+  const [result] = await pool.execute(
+    `INSERT INTO audit_logs (actor_type, actor_id, actor_name, action, target_type, target_id, detail, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      entry.actorType || "system",
+      Number(entry.actorId || 0),
+      entry.actorName || "系统",
+      entry.action || "系统动态",
+      entry.targetType || "",
+      String(entry.targetId || ""),
+      entry.detail || entry.action || "",
+      String(entry.createdAt || new Date().toISOString()).slice(0, 19).replace("T", " ")
+    ]
+  );
+  entry.id = Number(result.insertId || entry.id || 0);
+  return entry;
+}
+
 async function persistCartItem(userKey, productId, quantity) {
   if (!pool) return;
   await pool.execute(
@@ -693,10 +831,13 @@ async function deleteNotice(id) {
 
 module.exports = {
   initDatabase,
+  getDatabaseOverview,
+  reloadDatabase,
   persistActivity,
   persistActivityApplication,
   persistAdmin,
   persistCartItem,
+  persistAuditLog,
   persistComment,
   persistOrder,
   persistPost,

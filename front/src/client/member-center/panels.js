@@ -1,6 +1,7 @@
 import { updateUser } from "../../shared/state.js";
 import { emptyState } from "../../shared/ui.js";
 import { escapeHtml } from "../../shared/escape.js";
+import { displayOrderNo, formatDateTime, orderStore, paymentStatusText, statusText } from "../../stores/order.js";
 
 const listLabels = {
   favorites: ["我的收藏", "收藏书籍、饮品、活动或文创商品，一行一条。"],
@@ -16,7 +17,7 @@ function listPage(ctx, type) {
     <section class="section">
       <div class="section-head"><div><h2>${title}</h2><p class="lead">${desc}</p></div></div>
       <form class="card list-editor" id="list-form" data-list-type="${type}">
-        <label class="field"><span>${title}</span><textarea name="items" rows="10" placeholder="请输入内容，一行一条">${value}</textarea></label>
+        <label class="field"><span>${title}</span><textarea name="items" rows="10" placeholder="请输入内容，一行一条">${escapeHtml(value)}</textarea></label>
         <button class="btn" type="submit">保存${title}</button>
       </form>
     </section>
@@ -67,23 +68,43 @@ export function bindNotifications(ctx) {
 }
 
 export function renderMyOrders(ctx) {
-  const orders = ctx.state.data.member.orders || [];
+  const orders = orderStore.mergeOrders(ctx.state.data.member?.orders || []);
+  const activeStatus = ctx.state.orderStatusFilter || "all";
+  const tabs = [["all", "全部"], ["pending", "待支付"], ["paid", "已支付"], ["finished", "已完成"], ["cancelled", "已取消"]];
+  const filtered = activeStatus === "all" ? orders : orders.filter((order) => order.orderStatus === activeStatus);
+
   return `
     <section class="section">
-      <div class="section-head"><div><h2>我的订单</h2><p class="lead">查看文创商城订单、支付状态和积分等级度收益。</p></div></div>
-      ${orders.length ? `
-        <div class="feed">
-          ${orders.map((order) => `
-            <article class="card order-card">
-              <div class="post-meta"><strong>订单 #${order.id}</strong><span>${order.status}</span></div>
-              <p>${order.items.map((item) => `${item.name} × ${item.quantity}`).join("，")}</p>
-              <p class="price">${ctx.money(order.total)}</p>
-              <p class="muted">下单时间：${String(order.createdAt).slice(0, 19).replace("T", " ")}</p>
-              ${order.status === "待支付" ? `<button class="btn" data-pay-order="${order.id}">继续支付</button>` : ""}
+      <div class="section-head"><div><h2>我的订单</h2><p class="lead">订单号、缩略图、金额、订单状态和支付状态集中展示。</p></div></div>
+      <div class="tabs order-tabs">
+        ${tabs.map(([value, label]) => `<button class="${activeStatus === value ? "active" : ""}" data-order-filter="${value}">${label}</button>`).join("")}
+      </div>
+      ${filtered.length ? `
+        <div class="feed order-list">
+          ${filtered.map((order) => `
+            <article class="card order-card rich-order-card">
+              <div class="post-meta"><strong>${displayOrderNo(order.id)}</strong><span>${statusText(order.orderStatus)}</span></div>
+              <div class="order-list-body">
+                <div class="cart-thumb order-thumb">${order.items?.[0]?.image ? `<img src="${order.items[0].image}" alt="${escapeHtml(order.items[0].name)}" />` : `<span>${escapeHtml(order.items?.[0]?.name || "咖").slice(0, 1)}</span>`}</div>
+                <div>
+                  <p>${(order.items || []).map((item) => `${escapeHtml(item.name)} × ${item.quantity}`).join("，")}</p>
+                  <p class="muted">共 ${(order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0)} 件 · ${formatDateTime(order.createdAt)}</p>
+                </div>
+                <div class="order-money">
+                  <strong>${ctx.money(order.payAmount ?? order.total)}</strong>
+                  <span>${paymentStatusText(order.paymentStatus)}</span>
+                </div>
+              </div>
+              <div class="actions">
+                ${order.paymentStatus !== "success" && order.orderStatus !== "cancelled" ? `<button class="btn" data-pay-order="${order.id}">去支付</button>` : ""}
+                <button class="btn ghost" data-view-order="${order.id}">查看详情</button>
+                ${order.paymentStatus !== "success" && order.orderStatus !== "cancelled" ? `<button class="btn ghost" data-cancel-order="${order.id}">取消订单</button>` : ""}
+                ${order.paymentStatus === "success" && order.orderStatus !== "finished" ? `<button class="btn" data-finish-order="${order.id}">确认完成</button>` : ""}
+              </div>
             </article>
           `).join("")}
         </div>
-      ` : emptyState("暂无订单，去文创商城挑选喜欢的商品吧。")}
+      ` : emptyState("暂无符合条件的订单，去文创商城挑选喜欢的商品吧。")}
     </section>
   `;
 }
@@ -101,8 +122,8 @@ export function renderPointsCenter(ctx) {
       <div class="grid reward-grid">
         ${rewards.map((reward) => `
           <article class="card reward-card">
-            <h3>${reward.title}</h3>
-            <p class="muted">${reward.desc}</p>
+            <h3>${escapeHtml(reward.title)}</h3>
+            <p class="muted">${escapeHtml(reward.desc)}</p>
             <div class="cart-total"><strong>${reward.cost} 积分</strong><button class="btn" data-reward="${reward.id}" ${member.points < reward.cost ? "disabled" : ""}>兑换</button></div>
           </article>
         `).join("")}
@@ -115,7 +136,7 @@ export function renderMyGifts(ctx) {
   const gifts = ctx.state.data.member.gifts || [];
   return `
     <section class="section">
-      <div class="section-head"><div><h2>我的礼品</h2><p class="lead">积分兑换的礼券和权益会保存在这里，使用后仍保留核销记录。</p></div></div>
+      <div class="section-head"><div><h2>我的礼品</h2><p class="lead">积分兑换的礼券和权益会保存在这里。</p></div></div>
       ${gifts.length ? `
         <div class="grid reward-grid">
           ${gifts.map((gift) => `
@@ -123,8 +144,8 @@ export function renderMyGifts(ctx) {
               <div class="post-meta"><strong>${escapeHtml(gift.type)}</strong><span class="status">${escapeHtml(gift.status)}</span></div>
               <h3>${escapeHtml(gift.title)}</h3>
               <p class="muted">${escapeHtml(gift.desc)}</p>
-              <p class="muted">兑换时间：${String(gift.redeemedAt).slice(0, 19).replace("T", " ")}</p>
-              ${gift.usedAt ? `<p class="muted">使用时间：${String(gift.usedAt).slice(0, 19).replace("T", " ")}</p>` : ""}
+              <p class="muted">兑换时间：${formatDateTime(gift.redeemedAt)}</p>
+              ${gift.usedAt ? `<p class="muted">使用时间：${formatDateTime(gift.usedAt)}</p>` : ""}
               <div class="actions">
                 <button class="btn ghost" data-show-gift-qr="${encodeURIComponent(gift.id)}">显示核销二维码</button>
                 <button class="btn" data-use-gift="${encodeURIComponent(gift.id)}" ${gift.status === "已使用" ? "disabled" : ""}>${gift.status === "已使用" ? "已使用" : "确认核销"}</button>
@@ -138,9 +159,32 @@ export function renderMyGifts(ctx) {
 }
 
 export function bindMyOrders(ctx) {
+  document.querySelectorAll("[data-order-filter]").forEach((button) => button.addEventListener("click", () => {
+    ctx.state.orderStatusFilter = button.dataset.orderFilter;
+    ctx.render();
+  }));
+
   document.querySelectorAll("[data-pay-order]").forEach((button) => button.addEventListener("click", () => {
-    ctx.state.pendingCheckout = ctx.state.data.member.orders.find((order) => order.id === Number(button.dataset.payOrder));
+    ctx.state.selectedOrderId = button.dataset.payOrder;
+    ctx.state.pendingCheckout = orderStore.getOrderById(button.dataset.payOrder);
     ctx.setPage("payment");
+  }));
+
+  document.querySelectorAll("[data-view-order]").forEach((button) => button.addEventListener("click", () => {
+    ctx.state.selectedOrderId = button.dataset.viewOrder;
+    ctx.setPage("orderDetail");
+  }));
+
+  document.querySelectorAll("[data-cancel-order]").forEach((button) => button.addEventListener("click", () => {
+    orderStore.cancelOrder(button.dataset.cancelOrder);
+    ctx.toast("订单已取消");
+    ctx.render();
+  }));
+
+  document.querySelectorAll("[data-finish-order]").forEach((button) => button.addEventListener("click", () => {
+    orderStore.finishOrder(button.dataset.finishOrder);
+    ctx.toast("订单已确认完成");
+    ctx.render();
   }));
 }
 

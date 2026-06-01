@@ -25,6 +25,7 @@ const db = {
       level: "黄金会员",
       points: 2860,
       avatar: "",
+      birthday: "",
       showProfile: true,
       levelProgress: 820,
       lastCheckIn: "",
@@ -108,7 +109,7 @@ const db = {
   ],
   orders: [],
   books: [
-    { id: 1, title: "夜航西飞", author: "柏瑞尔·马卡姆", category: "文学", ranking: "周榜第 .gitignore", summary: "一位女性飞行员在非洲大陆上的生命回忆。文字克制而开阔，适合在安静的下午慢慢阅读。", publisher: "人民文学出版社", publishedAt: "2025-08-15 10:00:00", image: "https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=900&q=80" },
+    { id: 1, title: "夜航西飞", author: "柏瑞尔·马卡姆", category: "文学", ranking: "周榜第 1", summary: "一位女性飞行员在非洲大陆上的生命回忆。文字克制而开阔，适合在安静的下午慢慢阅读。", publisher: "人民文学出版社", publishedAt: "2025-08-15 10:00:00", image: "https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=900&q=80" },
     { id: 2, title: "置身事内", author: "兰小欢", category: "商业", ranking: "月榜第 2", summary: "从地方政府投融资切入，理解中国经济运行的现实逻辑。适合希望建立商业与公共治理视角的读者。", publisher: "上海人民出版社", publishedAt: "2025-11-02 09:30:00", image: "https://images.unsplash.com/photo-1495446815901-a7297e633e8d?auto=format&fit=crop&w=900&q=80" },
     { id: 3, title: "设计中的设计", author: "原研哉", category: "艺术", ranking: "季榜第 3", summary: "重新观察日常事物，从感知、留白与沟通出发理解设计。适合设计爱好者和创意工作者。", publisher: "山东人民出版社", publishedAt: "2026-01-12 14:00:00", image: "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?auto=format&fit=crop&w=900&q=80" },
     { id: 4, title: "日日是好日", author: "森下典子", category: "生活", ranking: "盲盒推荐", summary: "在学习茶道的岁月里体会四季、时间和专注。一本适合与咖啡一起阅读的温柔生活随笔。", publisher: "新星出版社", publishedAt: "2026-03-08 11:20:00", image: "https://images.unsplash.com/photo-1516979187457-637abb4f9353?auto=format&fit=crop&w=900&q=80" }
@@ -130,16 +131,28 @@ const db = {
     { id: 3, title: "会员积分兑换升级", summary: "积分可兑换手冲课、文创周边与活动优先名额。", date: "2026-06-08 09:00:00" }
   ],
   realtime: [
-    "2026-05-31 14:25:00 周五夜读会新增报名",
-    "2026-05-31 14:18:00 书友社区新增读书笔记",
-    "2026-05-31 14:12:00 精品咖啡豆礼盒售出 .gitignore 件",
-    "2026-05-31 14:08:00 用户完成 A1 座位预约"
+    { id: 0, actorType: "user", actorId: 1, actorName: "城市读者", action: "活动报名", targetType: "activity", targetId: "1", detail: "报名参加周五夜读会", createdAt: "2026-05-31 14:25:00" },
+    { id: 0, actorType: "user", actorId: 1, actorName: "城市读者", action: "发布社区动态", targetType: "post", targetId: "1", detail: "在书友社区发布读书笔记", createdAt: "2026-05-31 14:18:00" },
+    { id: 0, actorType: "system", actorId: 0, actorName: "系统", action: "商品售出", targetType: "product", targetId: "3", detail: "精品咖啡豆礼盒售出 1 件", createdAt: "2026-05-31 14:12:00" },
+    { id: 0, actorType: "user", actorId: 1, actorName: "城市读者", action: "预约座位", targetType: "reservation", targetId: "1", detail: "完成 A1 座位预约", createdAt: "2026-05-31 14:08:00" }
   ]
 };
 
-function recordRealtime(message) {
-  db.realtime.unshift(`${nowText()} ${message}`);
+function recordRealtime(action, options = {}) {
+  const entry = {
+    id: Number(options.id || 0),
+    actorType: options.actorType || "system",
+    actorId: Number(options.actorId || 0),
+    actorName: options.actorName || "系统",
+    action,
+    targetType: options.targetType || "",
+    targetId: String(options.targetId || ""),
+    detail: options.detail || action,
+    createdAt: options.createdAt || nowText()
+  };
+  db.realtime.unshift(entry);
   db.realtime = db.realtime.slice(0, 100);
+  return entry;
 }
 
 function homeData() {
@@ -183,7 +196,7 @@ function seatStatus(date = today(), time = "") {
 function dashboardData() {
   return {
     metrics: [
-      { label: "今日访客量", value: ".gitignore,482", change: "+18%" },
+      { label: "今日访客量", value: "1,482", change: "+18%" },
       { label: "预约订单", value: db.reservations.length, change: "实时累计" },
       { label: "咖啡销量", value: "386", change: "招牌拿铁领先" },
       { label: "活动参与", value: db.activities.reduce((sum, item) => sum + item.applied, 0), change: "活动开放报名" }

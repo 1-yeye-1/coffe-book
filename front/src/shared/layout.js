@@ -3,7 +3,7 @@ function isFrontActive(current, page) {
   if (page === "books") return ["books", "bookDetail"].includes(current);
   if (page === "reservation") return ["reservation", "reservationConfirm", "myReservations"].includes(current);
   if (page === "community") return ["community", "publishPost", "postDetail", "userHome"].includes(current);
-  if (page === "member") return ["member", "pointsCenter", "myGifts"].includes(current);
+  if (page === "member") return ["member", "pointsCenter", "myGifts", "myOrders", "orderDetail"].includes(current);
   if (page === "adminLogin") return current.startsWith("admin");
   return current === page;
 }

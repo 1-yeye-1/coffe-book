@@ -94,12 +94,29 @@ async function createCaptcha() {
   return { token, image: createCaptchaSvg(answer), expiresIn: 180 };
 }
 
+async function createSliderChallenge() {
+  const token = randomToken();
+  const target = 58 + Math.floor(Math.random() * 30);
+  const y = 20 + Math.floor(Math.random() * 36);
+  await setValue(`slider:${token}`, { target }, 180);
+  return { token, target, y, expiresIn: 180 };
+}
+
 async function verifyCaptcha(token, answer) {
   if (!token || !answer) return false;
   const item = await getValue(`captcha:${token}`);
   if (!item) return false;
   await deleteValue(`captcha:${token}`);
   return String(item.answer).toLowerCase() === String(answer).trim().toLowerCase();
+}
+
+async function verifySliderChallenge(token, value) {
+  if (!token) return false;
+  const item = await getValue(`slider:${token}`);
+  if (!item) return false;
+  await deleteValue(`slider:${token}`);
+  const number = Number(value);
+  return Number.isFinite(number) && Math.abs(number - Number(item.target)) <= 3;
 }
 
 async function createSmsCode(phone) {
@@ -140,8 +157,10 @@ async function verifySmsCode(phone, code) {
 
 module.exports = {
   createCaptcha,
+  createSliderChallenge,
   createSmsCode,
   initVerificationStore,
   verifyCaptcha,
+  verifySliderChallenge,
   verifySmsCode
 };
