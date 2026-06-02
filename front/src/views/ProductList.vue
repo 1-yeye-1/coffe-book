@@ -57,19 +57,27 @@ function validQuantity(product) {
 async function add(product) {
   if (!userStore.isLoggedIn) {
     router.push({ name: "login", query: { redirect: "/shop" } });
-    return;
+    return false;
   }
 
   const amount = validQuantity(product);
-  if (!amount) return;
+  if (!amount) return false;
 
   try {
     await cartStore.addProduct(product, amount, true);
     message.value = `已加入购物车：${product.name} x ${amount}`;
+    return true;
   } catch (err) {
     message.value = err.message;
+    return false;
+  } finally {
+    setTimeout(() => { message.value = ""; }, 1800);
   }
-  setTimeout(() => { message.value = ""; }, 1800);
+}
+
+async function buyNow(product) {
+  const added = await add(product);
+  if (added) router.push("/cart");
 }
 
 function retry() {
@@ -83,7 +91,7 @@ function retry() {
     <div class="section-head">
       <div>
         <h2>文创商城</h2>
-        <p class="lead">咖啡饮品、文创周边和会员订单流程都从这里开始。</p>
+        <p class="lead">文创周边、阅读礼品和会员订单流程都从这里开始。</p>
       </div>
       <RouterLink v-if="userStore.isLoggedIn" class="btn ghost" to="/cart">查看购物车</RouterLink>
     </div>
@@ -128,7 +136,10 @@ function retry() {
               <input v-model.number="quantities[product.id]" data-testid="product-quantity" type="number" min="1" :max="product.stock" step="1" :disabled="product.stock <= 0" />
             </label>
             <small class="quantity-hint">请输入 1 到 {{ product.stock }} 之间的整数</small>
-            <button class="btn" data-testid="add-to-cart" type="button" :disabled="product.stock <= 0" @click="add(product)">加入购物车</button>
+            <div class="actions">
+              <button class="btn ghost" data-testid="add-to-cart" type="button" :disabled="product.stock <= 0" @click="add(product)">加入购物车</button>
+              <button class="btn" data-testid="buy-now" type="button" :disabled="product.stock <= 0" @click="buyNow(product)">立即购买</button>
+            </div>
           </div>
         </article>
       </div>

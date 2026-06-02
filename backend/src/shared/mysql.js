@@ -49,6 +49,7 @@ async function initDatabase() {
   await createTables();
   await seedTables();
   await loadTables();
+  if (await ensureActivityApplicationDetails()) await loadTables();
   db.usingMysql = true;
   console.log(`MySQL connected: ${config.host}:${config.port}/${config.database}`);
 }
@@ -596,6 +597,26 @@ async function loadTables() {
   }));
 }
 
+async function ensureActivityApplicationDetails() {
+  if (!pool) return false;
+  let changed = false;
+  const demoActivityIds = new Set([1, 2, 3]);
+  for (const activity of db.activities.filter((item) => demoActivityIds.has(item.id))) {
+    const recordedPeople = db.activityApplications
+      .filter((item) => item.activityId === activity.id)
+      .reduce((sum, item) => sum + Number(item.people || 0), 0);
+    const missingPeople = Number(activity.applied || 0) - recordedPeople;
+    if (missingPeople > 0) {
+      await pool.execute(
+        "INSERT INTO activity_applications (activity_id, user_id, phone, people, kind, created_at) VALUES (?, 0, ?, ?, 'regular', ?)",
+        [activity.id, `139000090${String(activity.id).padStart(2, "0")}`, missingPeople, activity.registrationStart || new Date().toISOString().slice(0, 19).replace("T", " ")]
+      );
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function parseList(value, fallback) {
   if (!value) return fallback;
   try {
@@ -666,6 +687,7 @@ async function getDatabaseOverview() {
 async function reloadDatabase() {
   if (!pool) return;
   await loadTables();
+  if (await ensureActivityApplicationDetails()) await loadTables();
 }
 
 async function persistReservation(reservation) {

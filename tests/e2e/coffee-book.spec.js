@@ -67,7 +67,14 @@ async function cleanupRunData(api) {
     body: { account: ADMIN_ACCOUNT, password: ADMIN_PASSWORD }
   });
   const summary = await apiJson(api, "/api/admin/summary", { token: admin.token });
-  const includesRun = (item) => JSON.stringify(item).includes(RUN_ID);
+  const includesRun = (item) => {
+    const text = JSON.stringify(item);
+    return text.includes(RUN_ID)
+      || text.includes("E2E Coffee Kit")
+      || text.includes("Created by Playwright E2E")
+      || text.includes("E2E Reading Note")
+      || text.includes("E2E Reservation");
+  };
   const cleanupTargets = [
     ...(summary.orders || []).filter(includesRun).map((item) => [`/api/admin/orders/${item.id}`, "order"]),
     ...(summary.reservations || []).filter(includesRun).map((item) => [`/api/admin/reservations/${item.id}`, "reservation"]),

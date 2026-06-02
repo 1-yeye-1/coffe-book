@@ -9,7 +9,10 @@ const props = defineProps({
   statusOptions: {
     type: Array,
     default: () => [{ value: "all", label: "全部状态" }]
-  }
+  },
+  searchLabel: { type: String, default: "搜索" },
+  searchPlaceholder: { type: String, default: "输入名称、手机号、状态或编号" },
+  filterLabel: { type: String, default: "筛选" }
 });
 
 const emit = defineEmits(["update:query", "update:status", "update:page", "update:pageSize"]);
@@ -26,18 +29,18 @@ function next() {
 <template>
   <div class="admin-table-tools">
     <label class="admin-search">
-      <span>搜索</span>
+      <span>{{ searchLabel }}</span>
       <input
         :value="query"
         data-testid="admin-search-input"
         type="search"
-        placeholder="输入名称、手机号、状态或编号"
+        :placeholder="searchPlaceholder"
         @input="$emit('update:query', $event.target.value)"
       />
     </label>
 
     <label class="admin-filter">
-      <span>筛选</span>
+      <span>{{ filterLabel }}</span>
       <select :value="status" data-testid="admin-status-filter" @change="$emit('update:status', $event.target.value)">
         <option v-for="option in statusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>

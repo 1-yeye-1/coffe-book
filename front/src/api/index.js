@@ -1,6 +1,11 @@
+function defaultApiBase() {
+  const host = window.location.hostname || "localhost";
+  return `${window.location.protocol}//${host}:4173`;
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE
   || window.COFFEE_BOOK_API
-  || "http://localhost:4173";
+  || defaultApiBase();
 
 export class ApiError extends Error {
   constructor(message, status = 0, payload = null) {
@@ -36,7 +41,7 @@ async function apiRequest(path, options = {}, scope = "user") {
       body: normalizeBody(options.body)
     });
   } catch {
-    throw new ApiError("无法连接后端服务，请确认 backend 已启动在 http://localhost:4173");
+    throw new ApiError(`无法连接后端服务，请确认 backend 已启动在 ${API_BASE}`);
   }
 
   const body = await response.json().catch(() => null);

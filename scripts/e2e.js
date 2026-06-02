@@ -108,7 +108,14 @@ async function cleanupData() {
       body: { account: "admin", password: "admin123" }
     });
     const summary = await apiJson("/api/admin/summary", { token: admin.token });
-    const textIncludesRun = (item) => JSON.stringify(item).includes(runId);
+    const textIncludesRun = (item) => {
+      const text = JSON.stringify(item);
+      return text.includes(runId)
+        || text.includes("E2E Coffee Kit")
+        || text.includes("Created by Playwright E2E")
+        || text.includes("E2E Reading Note")
+        || text.includes("E2E Reservation");
+    };
     const cleanupTargets = [
       ...(summary.orders || []).filter(textIncludesRun).map((item) => [`/api/admin/orders/${item.id}`, "order"]),
       ...(summary.reservations || []).filter(textIncludesRun).map((item) => [`/api/admin/reservations/${item.id}`, "reservation"]),

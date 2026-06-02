@@ -64,7 +64,7 @@ async function handleFrontApi(req, res, url) {
   }
   if (method === "GET" && url.pathname === "/api/posts") {
     const viewer = currentUser(req);
-    const posts = db.posts.filter((post) => db.users.some((user) => user.id === post.userId));
+    const posts = db.posts.filter((post) => post.userId === 0 || db.users.some((user) => user.id === post.userId));
     return ok(res, posts.map((post) => publicPost(post, viewer)));
   }
   if (method === "GET" && url.pathname.match(/^\/api\/community\/users\/\d+$/)) {

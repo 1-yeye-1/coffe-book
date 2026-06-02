@@ -80,6 +80,9 @@ const statusOptions = {
   ],
   orders: [
     { value: "all", label: "全部状态" },
+    { value: "creative-order", label: "文创订单" },
+    { value: "coffee-order", label: "咖啡订单" },
+    { value: "mixed-order", label: "混合订单" },
     { value: "待支付", label: "待支付" },
     { value: "审核", label: "审核中" },
     { value: "已支付", label: "已支付" },
@@ -104,10 +107,24 @@ const statusOptions = {
   ]
 };
 const activeStatusOptions = computed(() => statusOptions[activeTableKey.value] || [{ value: "all", label: "全部状态" }]);
+const toolCopy = {
+  realtime: { placeholder: "搜索日志用户、动作或对象编号", filter: "日志类型" },
+  users: { placeholder: "搜索用户昵称、手机号、邮箱或等级", filter: "会员等级" },
+  products: { placeholder: "搜索商品名称、描述、分类或库存", filter: "商品分类" },
+  books: { placeholder: "搜索书名、作者、出版社或分类", filter: "书籍筛选" },
+  orders: { placeholder: "搜索订单号、用户、商品名或支付状态", filter: "订单筛选" },
+  reservations: { placeholder: "搜索座位、手机号、日期或用途", filter: "预约状态" },
+  activities: { placeholder: "搜索活动名称、地点、日期或报名手机号", filter: "活动筛选" },
+  posts: { placeholder: "搜索动态标题、作者、评论或审核状态", filter: "社区筛选" },
+  notices: { placeholder: "搜索公告标题、摘要或发布时间", filter: "内容筛选" },
+  databaseOverview: { placeholder: "搜索表名、字段名或数据类型", filter: "数据筛选" }
+};
+const activeToolCopy = computed(() => toolCopy[activeTableKey.value] || { placeholder: "输入关键词搜索当前页面", filter: "筛选" });
 
 watch(active, () => {
   adminStatus.value = "all";
   adminQuery.value = "";
+  if (adminUser.value) refresh();
 });
 
 watch([adminQuery, adminStatus, adminPageSize], () => {
@@ -115,6 +132,7 @@ watch([adminQuery, adminStatus, adminPageSize], () => {
 });
 
 onMounted(() => {
+  if (adminUser.value && !localStorage.getItem("coffee_admin_token")) logout();
   if (adminUser.value) refresh();
   realtimeTimer = setInterval(() => {
     if (adminUser.value) loadRealtime();
@@ -153,10 +171,14 @@ function logout() {
 
 async function refresh() {
   loading.value = true;
+  error.value = "";
   try {
     const adminSummary = await adminRequest("/api/admin/summary");
     summary.value = adminSummary;
     await loadRealtime();
+  } catch (err) {
+    error.value = err.message;
+    if (err.status === 401) logout();
   } finally {
     loading.value = false;
   }
@@ -317,6 +339,34 @@ function reviewLabel(status) {
   return status === "approved" ? "已通过" : status === "rejected" ? "已驳回" : status === "pending" ? "待审核" : "未提交";
 }
 
+function productCategoryLabel(category) {
+  return category === "coffee" ? "咖啡商品" : "文创商品";
+}
+
+function orderType(item) {
+  const categories = new Set((item.items || []).map((entry) => {
+    const product = rows.value.products.find((productItem) => productItem.id === Number(entry.productId));
+    return product?.category || "creative";
+  }));
+  if (categories.has("coffee") && categories.has("creative")) return "mixed";
+  return categories.has("coffee") ? "coffee" : "creative";
+}
+
+function orderTypeLabel(item) {
+  const type = orderType(item);
+  if (type === "coffee") return "咖啡订单";
+  if (type === "mixed") return "混合订单";
+  return "文创订单";
+}
+
+function applicationsForActivity(activityId) {
+  return rows.value.activityApplications.filter((item) => item.activityId === activityId);
+}
+
+function applicationKindLabel(kind) {
+  return kind === "early" ? "提前报名" : "直接报名";
+}
+
 function actorLabel(item) {
   if (item.actorType === "admin") return `管理员 #${item.actorId}`;
   if (item.actorId) return `用户 #${item.actorId}`;
@@ -344,7 +394,12 @@ function matchesStatus(key, item) {
     return item.category === status;
   }
   if (key === "users") return String(item.level || "").includes(status);
-  if (key === "orders") return String(item.status || "").includes(status) || String(item.paymentReviewStatus || "").includes(status);
+  if (key === "orders") {
+    if (status === "coffee-order") return orderType(item) === "coffee";
+    if (status === "creative-order") return orderType(item) === "creative";
+    if (status === "mixed-order") return orderType(item) === "mixed";
+    return String(item.status || "").includes(status) || String(item.paymentReviewStatus || "").includes(status);
+  }
   if (key === "reservations") return String(item.status || "").includes(status);
   if (key === "posts") {
     if (status === "has-comments") return (item.comments || []).length > 0;
@@ -357,7 +412,10 @@ function matchesStatus(key, item) {
 function filteredAdminRows(key) {
   const keyword = adminQuery.value.trim().toLowerCase();
   return sourceRows(key).filter((item) => {
-    const matchedText = !keyword || rowText(item).includes(keyword);
+    const text = key === "activities"
+      ? `${rowText(item)} ${applicationsForActivity(item.id).map((application) => rowText(application)).join(" ")}`
+      : rowText(item);
+    const matchedText = !keyword || text.includes(keyword);
     return matchedText && matchesStatus(key, item);
   });
 }
@@ -426,6 +484,8 @@ function adminRows(key) {
           :total="adminTotal(activeTableKey)"
           :pages="adminPages(activeTableKey)"
           :status-options="activeStatusOptions"
+          :search-placeholder="activeToolCopy.placeholder"
+          :filter-label="activeToolCopy.filter"
         />
         <p v-if="message" class="toast-inline">{{ message }}</p>
         <p v-if="error" class="form-error">{{ error }}</p>
@@ -458,7 +518,10 @@ function adminRows(key) {
 
         <section v-if="active === 'products'" class="section">
           <button class="btn" data-testid="admin-add-product" type="button" @click="openModal('新增商品', '/api/admin/products', 'POST', productFields())">新增商品</button>
-          <div class="card table-card"><table><thead><tr><th>ID</th><th>商品</th><th>分类</th><th>价格</th><th>库存</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('products')" :key="item.id"><td>{{ item.id }}</td><td>{{ item.name }}</td><td>{{ item.category === 'coffee' ? '咖啡饮品' : '文创商品' }}</td><td>{{ money(item.price) }}</td><td>{{ item.stock }}</td><td><button class="btn ghost" @click="openModal('编辑商品', `/api/admin/products/${item.id}`, 'PATCH', productFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/products/${item.id}`)">删除</button></td></tr></tbody></table></div>
+          <div v-for="categoryKey in ['coffee', 'creative']" :key="categoryKey" class="card table-card">
+            <h3>{{ productCategoryLabel(categoryKey) }}</h3>
+            <table><thead><tr><th>ID</th><th>商品</th><th>分类</th><th>价格</th><th>库存</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('products').filter((product) => product.category === categoryKey)" :key="item.id"><td>{{ item.id }}</td><td>{{ item.name }}</td><td>{{ productCategoryLabel(item.category) }}</td><td>{{ money(item.price) }}</td><td>{{ item.stock }}</td><td><button class="btn ghost" @click="openModal('编辑商品', `/api/admin/products/${item.id}`, 'PATCH', productFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/products/${item.id}`)">删除</button></td></tr><tr v-if="!adminRows('products').filter((product) => product.category === categoryKey).length"><td colspan="6">暂无{{ productCategoryLabel(categoryKey) }}</td></tr></tbody></table>
+          </div>
         </section>
 
         <section v-if="active === 'books'" class="section">
@@ -466,9 +529,12 @@ function adminRows(key) {
           <div class="card table-card"><table><thead><tr><th>书名</th><th>作者</th><th>分类</th><th>收录时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('books')" :key="item.id"><td>{{ item.title }}</td><td>{{ item.author }}</td><td>{{ item.category }}</td><td>{{ item.publishedAt }}</td><td><button class="btn ghost" @click="openModal('编辑书籍', `/api/admin/books/${item.id}`, 'PATCH', bookFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/books/${item.id}`)">删除</button></td></tr></tbody></table></div>
         </section>
 
-        <section v-if="active === 'orders'" class="section">
+        <section v-if="active === 'orders'" class="section" data-testid="admin-orders-table">
           <button class="btn" type="button" @click="openModal('新增订单', '/api/admin/orders', 'POST', orderFields())">新增订单</button>
-          <div class="card table-card" data-testid="admin-orders-table"><table><thead><tr><th>订单号</th><th>用户ID</th><th>用户</th><th>商品数</th><th>金额</th><th>状态</th><th>支付</th><th>付款审核</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('orders')" :key="item.id"><td>#{{ item.id }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.userName }}</td><td>{{ item.items?.length || 0 }}</td><td>{{ money(item.total) }}</td><td>{{ item.status }}</td><td>{{ item.paymentMethod || '-' }}</td><td><span class="status">{{ reviewLabel(item.paymentReviewStatus) }}</span><div v-if="item.paymentReviewStatus === 'pending'" class="actions"><button class="btn" type="button" @click="reviewPayment(item, 'approved')">通过</button><button class="btn secondary" type="button" @click="reviewPayment(item, 'rejected')">驳回</button></div></td><td><button class="btn ghost" @click="openModal('编辑订单', `/api/admin/orders/${item.id}`, 'PATCH', orderFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/orders/${item.id}`)">删除</button></td></tr></tbody></table></div>
+          <div v-for="typeKey in ['coffee', 'creative', 'mixed']" :key="typeKey" class="card table-card">
+            <h3>{{ typeKey === 'coffee' ? '咖啡订单' : typeKey === 'creative' ? '文创订单' : '混合订单' }}</h3>
+            <table><thead><tr><th>订单号</th><th>类型</th><th>用户ID</th><th>用户</th><th>商品数</th><th>金额</th><th>状态</th><th>支付</th><th>付款审核</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('orders').filter((order) => orderType(order) === typeKey)" :key="item.id"><td>#{{ item.id }}</td><td>{{ orderTypeLabel(item) }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.userName }}</td><td>{{ item.items?.length || 0 }}</td><td>{{ money(item.total) }}</td><td>{{ item.status }}</td><td>{{ item.paymentMethod || '-' }}</td><td><span class="status">{{ reviewLabel(item.paymentReviewStatus) }}</span><div v-if="item.paymentReviewStatus === 'pending'" class="actions"><button class="btn" type="button" @click="reviewPayment(item, 'approved')">通过</button><button class="btn secondary" type="button" @click="reviewPayment(item, 'rejected')">驳回</button></div></td><td><button class="btn ghost" @click="openModal('编辑订单', `/api/admin/orders/${item.id}`, 'PATCH', orderFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/orders/${item.id}`)">删除</button></td></tr><tr v-if="!adminRows('orders').filter((order) => orderType(order) === typeKey).length"><td colspan="10">暂无{{ typeKey === 'coffee' ? '咖啡订单' : typeKey === 'creative' ? '文创订单' : '混合订单' }}</td></tr></tbody></table>
+          </div>
         </section>
 
         <section v-if="active === 'reservations'" class="section">
@@ -479,11 +545,15 @@ function adminRows(key) {
         <section v-if="active === 'activities'" class="section">
           <button class="btn" type="button" @click="openModal('新增活动', '/api/admin/activities', 'POST', activityFields())">新增活动</button>
           <div class="card table-card"><table><thead><tr><th>ID</th><th>活动</th><th>日期</th><th>地点</th><th>直接报名</th><th>提前报名</th><th>报名</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('activities')" :key="item.id"><td>{{ item.id }}</td><td>{{ item.title }}</td><td>{{ item.date }} {{ item.time }}</td><td>{{ item.location || '-' }}</td><td>{{ item.registrationStart || '-' }}</td><td>{{ item.earlyStart || '-' }}</td><td>{{ item.applied }}/{{ item.capacity }}</td><td><button class="btn ghost" @click="openModal('编辑活动', `/api/admin/activities/${item.id}`, 'PATCH', activityFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/activities/${item.id}`)">删除</button></td></tr></tbody></table></div>
-          <div class="card table-card"><h3>报名记录 activity_applications</h3><table><thead><tr><th>ID</th><th>活动ID</th><th>用户ID</th><th>手机号</th><th>人数</th><th>类型</th><th>时间</th></tr></thead><tbody><tr v-for="item in rows.activityApplications" :key="item.id"><td>{{ item.id }}</td><td>{{ item.activityId }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.phone }}</td><td>{{ item.people }}</td><td>{{ item.kind }}</td><td>{{ item.createdAt }}</td></tr></tbody></table></div>
+          <div v-for="activity in adminRows('activities')" :key="`applications-${activity.id}`" class="card table-card">
+            <h3>{{ activity.title }} 报名明细</h3>
+            <p class="muted">来自 activity_applications 表，按 activity_id 与当前活动关联；提前报名会单独标注，便于核对会员权益。</p>
+            <table><thead><tr><th>ID</th><th>用户ID</th><th>用户</th><th>会员等级</th><th>手机号</th><th>人数</th><th>报名类型</th><th>时间</th></tr></thead><tbody><tr v-for="item in applicationsForActivity(activity.id)" :key="item.id"><td>{{ item.id }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.userName || (item.userId ? `用户 #${item.userId}` : '访客') }}</td><td>{{ item.userLevel || '-' }}</td><td>{{ item.phone }}</td><td>{{ item.people }}</td><td><span class="status-pill" :class="item.kind === 'early' ? 'pending' : 'done'">{{ applicationKindLabel(item.kind) }}</span></td><td>{{ item.createdAt }}</td></tr><tr v-if="!applicationsForActivity(activity.id).length"><td colspan="8">暂无报名记录</td></tr></tbody></table>
+          </div>
         </section>
 
         <section v-if="active === 'community'" class="section">
-          <div class="card table-card"><table><thead><tr><th>作者</th><th>标题</th><th>点赞</th><th>评论数</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('posts')" :key="item.id"><td>{{ item.author }}</td><td>{{ item.title }}</td><td>{{ item.likes }}</td><td>{{ item.comments?.length || 0 }}</td><td><button class="btn ghost" @click="openModal('编辑动态', `/api/admin/posts/${item.id}`, 'PATCH', [{ name: 'title', label: '标题', value: item.title }, { name: 'content', label: '内容', value: item.content, type: 'textarea' }])">编辑</button><button class="btn danger" @click="remove(`/api/admin/posts/${item.id}`)">删除</button></td></tr></tbody></table></div>
+          <div class="card table-card"><table><thead><tr><th>作者</th><th>标题</th><th>点赞</th><th>前台可见评论</th><th>待审核评论</th><th>数据状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('posts')" :key="item.id"><td>{{ item.author }}</td><td>{{ item.title }}</td><td>{{ item.likes }}</td><td>{{ item.comments?.filter((comment) => comment.status === 'approved').length || 0 }}</td><td>{{ item.comments?.filter((comment) => comment.status === 'pending').length || 0 }}</td><td><span class="status">{{ item.userId ? '会员动态' : '后台发布' }}</span></td><td><button class="btn ghost" @click="openModal('编辑动态', `/api/admin/posts/${item.id}`, 'PATCH', [{ name: 'title', label: '标题', value: item.title }, { name: 'content', label: '内容', value: item.content, type: 'textarea' }])">编辑</button><button class="btn danger" @click="remove(`/api/admin/posts/${item.id}`)">删除</button></td></tr></tbody></table></div>
           <div class="card table-card">
             <h3>评论审核</h3>
             <table><thead><tr><th>评论ID</th><th>动态</th><th>用户ID</th><th>用户</th><th>评论内容</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in comments" :key="item.id"><td>#{{ item.id }}</td><td>#{{ item.postId }} {{ item.postTitle }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.user }}</td><td>{{ item.content }}</td><td><span class="status">{{ reviewLabel(item.status) }}</span></td><td><button class="btn" type="button" @click="reviewComment(item, 'approved')">通过</button><button class="btn secondary" type="button" @click="reviewComment(item, 'rejected')">驳回</button><button class="btn danger" type="button" @click="remove(`/api/admin/posts/${item.postId}/comments/${item.id}`)">删除</button></td></tr><tr v-if="!comments.length"><td colspan="7">暂无评论</td></tr></tbody></table>

@@ -16,6 +16,14 @@ const moduleTableMap = [
 
 async function adminSummary() {
   await reloadDatabase();
+  const activityApplications = db.activityApplications.map((application) => {
+    const user = db.users.find((item) => item.id === Number(application.userId));
+    return {
+      ...application,
+      userName: user?.name || "",
+      userLevel: user?.level || ""
+    };
+  });
   return {
     metrics: [
       { label: "用户数", value: db.users.length, note: "会员账户" },
@@ -35,7 +43,7 @@ async function adminSummary() {
     orders: db.orders,
     reservations: db.reservations,
     activities: db.activities,
-    activityApplications: db.activityApplications,
+    activityApplications,
     notices: db.notices,
     books: db.books,
     posts: db.posts,

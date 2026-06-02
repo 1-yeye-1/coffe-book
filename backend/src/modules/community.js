@@ -19,7 +19,7 @@ function publicComment(comment, viewer) {
 
 function publicPost(post, viewer) {
   const likedBy = Array.isArray(post.likedBy) ? post.likedBy : [];
-  const comments = (post.comments || []).filter((comment) => comment.status === "approved" && db.users.some((user) => user.id === comment.userId));
+  const comments = (post.comments || []).filter((comment) => comment.status === "approved" && (comment.userId === 0 || db.users.some((user) => user.id === comment.userId)));
   return {
     id: post.id,
     userId: post.userId,
