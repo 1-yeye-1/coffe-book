@@ -4,16 +4,22 @@
 
 ## 启动方式
 
-前后端需要分别启动，建议打开两个终端窗口。
+推荐在项目根目录一键启动，脚本会同时启动后端 `http://localhost:4173` 和前端 `http://localhost:5173`：
+
+```bash
+npm run dev
+```
+
+如果需要手动分开启动，建议先启动后端，再启动前端。前端可以先启动，但后端没起来时接口页面会显示加载失败或接口连接错误。
 
 后端：
 
 ```bash
 cd backend
-node index.js
+npm run dev
 ```
 
-前端：
+另开一个终端启动前端：
 
 ```bash
 cd front
