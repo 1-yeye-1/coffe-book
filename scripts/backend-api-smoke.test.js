@@ -303,6 +303,14 @@ async function main() {
     token: demoSession.token
   }, 403));
 
+  await step("reservation listing ownership guard", async () => {
+    const demoMember = await request("/api/member", { token: demoSession.token });
+    if (demoMember.reservations.some((item) => item.id === reservation.id)) {
+      throw new Error("reservation leaked into another user's member center");
+    }
+    return demoMember;
+  });
+
   await step("my reservations", async () => {
     const member = await request("/api/member", { token });
     if (!member.reservations.some((item) => item.id === reservation.id)) throw new Error("reservation not found in member center");

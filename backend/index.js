@@ -50,7 +50,10 @@ const server = http.createServer(async (req, res) => {
 
     return ok(res, apiIndex());
   } catch (error) {
-    return fail(res, error.statusCode || 500, error.message || "服务器错误");
+    console.error("API error:", error.stack || error.message);
+    const status = error.statusCode || 500;
+    const message = status >= 500 ? "服务器暂时无法处理请求，请稍后再试" : error.message;
+    return fail(res, status, message);
   }
 });
 

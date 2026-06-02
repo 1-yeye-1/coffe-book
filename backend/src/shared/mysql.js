@@ -221,6 +221,7 @@ async function createTables() {
   await ensureCommunityColumns();
   await ensureNoticeColumns();
   await linkCommunityUsers();
+  await ensureIndexes();
 }
 
 async function ensurePasswordColumns() {
@@ -342,6 +343,33 @@ async function ensureNoticeColumns() {
 async function linkCommunityUsers() {
   await pool.query("UPDATE posts p INNER JOIN users u ON u.name=p.author SET p.user_id=u.id WHERE p.user_id=0");
   await pool.query("UPDATE comments c INNER JOIN users u ON u.name=c.user SET c.user_id=u.id WHERE c.user_id=0");
+}
+
+async function ensureIndexes() {
+  const indexes = [
+    { table: "orders", name: "idx_orders_user_id", columns: "user_id" },
+    { table: "orders", name: "idx_orders_status", columns: "status" },
+    { table: "reservations", name: "idx_reservations_user_id", columns: "user_id" },
+    { table: "reservations", name: "idx_reservations_date", columns: "date" },
+    { table: "reservations", name: "idx_reservations_date_time", columns: "date, time" },
+    { table: "posts", name: "idx_posts_user_id", columns: "user_id" },
+    { table: "comments", name: "idx_comments_post_id", columns: "post_id" },
+    { table: "comments", name: "idx_comments_user_id", columns: "user_id" },
+    { table: "activity_applications", name: "idx_activity_applications_activity_id", columns: "activity_id" },
+    { table: "activity_applications", name: "idx_activity_applications_user_id", columns: "user_id" },
+    { table: "carts", name: "idx_carts_user_key", columns: "user_key" },
+    { table: "audit_logs", name: "idx_audit_logs_created_at", columns: "created_at" }
+  ];
+
+  for (const index of indexes) {
+    const [rows] = await pool.query(
+      "SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND INDEX_NAME=? LIMIT 1",
+      [config.database, index.table, index.name]
+    );
+    if (!rows.length) {
+      await pool.query(`CREATE INDEX \`${index.name}\` ON \`${index.table}\` (${index.columns})`);
+    }
+  }
 }
 
 async function countRows(table) {

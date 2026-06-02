@@ -2,11 +2,10 @@ const { corsOrigin, ok, fail } = require("./shared/response");
 const { parseBody } = require("./shared/request-body");
 const { clearLoginFailures, currentUser, loginAllowed, publicUser, recordLoginFailure, sign } = require("./shared/auth");
 const { hashPassword, needsUpgrade, verifyPassword } = require("./shared/password");
-const { dashboardData, db, homeData, recordRealtime, seatStatus, today } = require("./shared/data");
+const { dashboardData, db, homeData, seatStatus, today } = require("./shared/data");
 const {
   persistActivity,
   persistActivityApplication,
-  persistAuditLog,
   persistCartItem,
   persistComment,
   persistOrder,
@@ -16,214 +15,16 @@ const {
   persistUser
 } = require("./shared/mysql");
 const { createCaptcha, createSliderChallenge, createSmsCode, verifyCaptcha, verifySliderChallenge, verifySmsCode } = require("./shared/verification-store");
+const { auditActivity } = require("./shared/audit");
+const { asTime, currentMonth, nextId, safeImage, validBirthday, validEmail, validInteger, validPhone, validStrongPassword } = require("./shared/validators");
+const { findActivityById, hasAppliedActivity } = require("./modules/activities");
+const { getUserCart, setUserCart } = require("./modules/cart");
+const { communityProfile, publicComment, publicPost } = require("./modules/community");
+const { earlySignupQuota, memberData, memberLevels, normalizeMember, pointRewards } = require("./modules/member");
+const { findOrderById, userOwnsOrder } = require("./modules/orders");
+const { findBookById, findProductById, listBooks, listProducts } = require("./modules/products");
+const { findReservationById, userOwnsReservation } = require("./modules/reservations");
 const QRCode = require("qrcode");
-
-function nextId(items) {
-  return items.length ? Math.max(...items.map((item) => item.id)) + 1 : 1;
-}
-
-function validPhone(phone) {
-  return /^1[3-9]\d{9}$/.test(String(phone || "").trim());
-}
-
-function validEmail(email) {
-  const value = String(email || "").trim();
-  return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function validBirthday(birthday) {
-  const value = String(birthday || "").trim();
-  if (!value) return true;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day && value <= today();
-}
-
-async function auditActivity(action, options = {}) {
-  const entry = recordRealtime(action, options);
-  await persistAuditLog(entry);
-  return entry;
-}
-
-function validStrongPassword(password) {
-  const value = String(password || "");
-  return value.length >= 8
-    && value.length <= 32
-    && /[a-z]/.test(value)
-    && /[A-Z]/.test(value)
-    && /\d/.test(value)
-    && /[^A-Za-z0-9]/.test(value);
-}
-
-function validInteger(value, min = 1, max = Number.MAX_SAFE_INTEGER) {
-  const number = Number(value);
-  return Number.isInteger(number) && number >= min && number <= max;
-}
-
-function asTime(value) {
-  return new Date(String(value || "").replace(" ", "T")).getTime();
-}
-
-function currentMonth() {
-  return new Date().toISOString().slice(0, 7);
-}
-
-function safeImage(image, maxBytes = 1.5 * 1024 * 1024) {
-  const value = String(image || "");
-  if (!value) return "";
-  if (!value.startsWith("data:image/")) throw new Error("仅支持上传图片文件");
-  if (value.length > maxBytes) throw new Error("图片过大，请压缩后上传");
-  return value;
-}
-
-function communityProfile(user) {
-  return { id: user.id, name: user.name, avatar: user.avatar || "", level: user.level, showProfile: user.showProfile !== false };
-}
-
-function publicComment(comment, viewer) {
-  const likedBy = Array.isArray(comment.likedBy) ? comment.likedBy : [];
-  return {
-    id: comment.id,
-    userId: comment.userId,
-    user: comment.user,
-    avatar: comment.avatar || "",
-    content: comment.content,
-    likes: Number(comment.likes || 0),
-    liked: Boolean(viewer && likedBy.includes(viewer.id))
-  };
-}
-
-function publicPost(post, viewer) {
-  const likedBy = Array.isArray(post.likedBy) ? post.likedBy : [];
-  const comments = (post.comments || []).filter((comment) => comment.status === "approved" && db.users.some((user) => user.id === comment.userId));
-  return {
-    id: post.id,
-    userId: post.userId,
-    author: post.author,
-    avatar: post.avatar || "",
-    title: post.title,
-    content: post.content,
-    image: post.image || "",
-    likes: Number(post.likes || 0),
-    liked: Boolean(viewer && likedBy.includes(viewer.id)),
-    comments: comments.map((comment) => publicComment(comment, viewer))
-  };
-}
-
-const memberLevelDefinitions = [
-  {
-    name: "普通会员",
-    min: 0,
-    next: 500,
-    benefits: [
-      { key: "check-in", label: "每日签到 +10 积分" },
-      { key: "shop-discount", label: "文创商品 95 折券兑换" },
-      { key: "event-reminder", label: "活动报名提醒" }
-    ]
-  },
-  {
-    name: "黄金会员",
-    min: 500,
-    next: 1500,
-    benefits: [
-      { key: "check-in", label: "每日签到提升至 +15 积分" },
-      { key: "shop-discount", label: "文创商品折扣提升至 9 折" },
-      { key: "event-priority", label: "活动优先报名" },
-      { key: "birthday-coffee", label: "生日咖啡券" }
-    ]
-  },
-  {
-    name: "钻石会员",
-    min: 1500,
-    next: null,
-    benefits: [
-      { key: "check-in", label: "每日签到提升至 +20 积分" },
-      { key: "shop-discount", label: "文创商品折扣提升至 85 折" },
-      { key: "event-quota", label: "活动专属名额" },
-      { key: "monthly-coffee", label: "每月精品咖啡体验" }
-    ]
-  }
-];
-
-const memberLevels = memberLevelDefinitions.map((level, index) => {
-  const inheritedBenefits = new Map();
-  for (const item of memberLevelDefinitions.slice(0, index + 1)) {
-    for (const benefit of item.benefits) inheritedBenefits.set(benefit.key, benefit.label);
-  }
-  return {
-    name: level.name,
-    min: level.min,
-    next: level.next,
-    inheritedFrom: memberLevelDefinitions.slice(0, index).map((item) => item.name),
-    benefits: [...inheritedBenefits.values()]
-  };
-});
-
-const pointRewards = [
-  { id: "coffee-coupon", title: "精品咖啡兑换券", cost: 300, desc: "可兑换任意标准杯饮品 1 杯", type: "饮品券" },
-  { id: "shop-10", title: "文创商城 10 元优惠券", cost: 500, desc: "满 59 元可用", type: "优惠券" },
-  { id: "event-priority", title: "活动优先报名券", cost: 800, desc: "热门活动开放前优先锁定名额", type: "活动券" }
-];
-
-function normalizeMember(user) {
-  user.levelProgress = Number(user.levelProgress || 0);
-  const level = [...memberLevels].reverse().find((item) => user.levelProgress >= item.min) || memberLevels[0];
-  user.level = level.name;
-  user.points = Number(user.points || 0);
-  user.favorites = Array.isArray(user.favorites) ? user.favorites : [];
-  user.notes = Array.isArray(user.notes) ? user.notes : [];
-  user.notifications = Array.isArray(user.notifications) ? user.notifications : [];
-  user.gifts = Array.isArray(user.gifts) ? user.gifts : [];
-  return level;
-}
-
-function membershipData(user) {
-  const level = normalizeMember(user);
-  const index = memberLevels.findIndex((item) => item.name === level.name);
-  const next = memberLevels[index + 1] || null;
-  const span = next ? next.min - level.min : 1;
-  const current = Math.max(0, user.levelProgress - level.min);
-  return {
-    level: level.name,
-    levelProgress: user.levelProgress,
-    current,
-    target: next ? span : current,
-    nextLevel: next?.name || "已达最高等级",
-    need: next ? Math.max(0, next.min - user.levelProgress) : 0,
-    benefits: level.benefits,
-    allLevels: memberLevels,
-    rewards: pointRewards,
-    checkedInToday: user.lastCheckIn === today()
-  };
-}
-
-function earlySignupQuota(user) {
-  const level = normalizeMember(user);
-  if (level.name === "钻石会员") return 3;
-  if (level.name === "黄金会员") return 2;
-  return 1;
-}
-
-function memberData(user) {
-  normalizeMember(user);
-  const comments = db.posts.flatMap((post) => post.comments || []).filter((comment) => comment.userId === user.id);
-  return {
-    ...publicUser(user),
-    reservations: db.reservations.filter((item) => item.userId === user.id),
-    orders: db.orders.filter((item) => item.userId === user.id),
-    favorites: user.favorites,
-    notes: user.notes,
-    notifications: user.notifications,
-    gifts: user.gifts,
-    stats: {
-      favoriteBooks: user.favorites.length,
-      publishedComments: comments.length,
-      orderCount: db.orders.filter((item) => item.userId === user.id).length
-    },
-    membership: membershipData(user)
-  };
-}
 
 async function handleFrontApi(req, res, url) {
   const method = req.method;
@@ -245,20 +46,20 @@ async function handleFrontApi(req, res, url) {
   if (method === "GET" && url.pathname === "/api/auth/captcha") return ok(res, await createCaptcha());
   if (method === "GET" && url.pathname === "/api/auth/slider") return ok(res, await createSliderChallenge());
   if (method === "GET" && url.pathname === "/api/home") return ok(res, homeData());
-  if (method === "GET" && url.pathname === "/api/products") return ok(res, db.products);
+  if (method === "GET" && url.pathname === "/api/products") return ok(res, listProducts());
   if (method === "GET" && url.pathname.startsWith("/api/products/")) {
-    const product = db.products.find((item) => item.id === Number(url.pathname.split("/").pop()));
+    const product = findProductById(url.pathname.split("/").pop());
     return product ? ok(res, product) : fail(res, 404, "商品不存在");
   }
-  if (method === "GET" && url.pathname === "/api/books") return ok(res, db.books);
+  if (method === "GET" && url.pathname === "/api/books") return ok(res, listBooks());
   if (method === "GET" && url.pathname.match(/^\/api\/books\/\d+$/)) {
-    const book = db.books.find((item) => item.id === Number(url.pathname.split("/").pop()));
+    const book = findBookById(url.pathname.split("/").pop());
     return book ? ok(res, book) : fail(res, 404, "书籍不存在");
   }
   if (method === "GET" && url.pathname === "/api/seats/status") return ok(res, seatStatus(url.searchParams.get("date") || today(), url.searchParams.get("time") || ""));
   if (method === "GET" && url.pathname === "/api/activities") return ok(res, db.activities);
   if (method === "GET" && url.pathname.match(/^\/api\/activities\/\d+$/)) {
-    const activity = db.activities.find((item) => item.id === Number(url.pathname.split("/").pop()));
+    const activity = findActivityById(url.pathname.split("/").pop());
     return activity ? ok(res, activity) : fail(res, 404, "活动不存在");
   }
   if (method === "GET" && url.pathname === "/api/posts") {
@@ -283,9 +84,9 @@ async function handleFrontApi(req, res, url) {
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再查询支付状态");
     const id = Number(url.pathname.split("/")[3]);
-    const order = db.orders.find((item) => item.id === id);
+    const order = findOrderById(id);
     if (!order) return fail(res, 404, "订单不存在");
-    if (order.userId !== user.id) return fail(res, 403, "不能查询其他用户的订单");
+    if (!userOwnsOrder(order, user)) return fail(res, 403, "不能查询其他用户的订单");
     return ok(res, order);
   }
 
@@ -505,19 +306,19 @@ async function handleFrontApi(req, res, url) {
   if (method === "POST" && url.pathname === "/api/cart") {
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再加入购物车");
-    const product = db.products.find((item) => item.id === Number(body.productId));
+    const product = findProductById(body.productId);
     if (!product) return fail(res, 404, "商品不存在");
     const key = user.id;
     const quantity = Number(body.quantity || 1);
     if (product.stock < 1) return fail(res, 409, "商品已售罄");
     if (!validInteger(quantity, 1, product.stock)) return fail(res, 400, `商品数量必须是 1 到 ${product.stock} 之间的整数`);
-    const cart = db.carts.get(key) || [];
+    const cart = getUserCart(key);
     const currentQuantity = cart
       .filter((item) => item.productId === product.id)
       .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
     if (currentQuantity + quantity > product.stock) return fail(res, 409, `购物车中的该商品数量必须是 1 到 ${product.stock} 之间的整数`);
     cart.push({ productId: product.id, quantity });
-    db.carts.set(key, cart);
+    setUserCart(key, cart);
     await persistCartItem(key, product.id, quantity);
     return ok(res, cart, "加入购物车成功");
   }
@@ -530,23 +331,23 @@ async function handleFrontApi(req, res, url) {
     if (items.length > 30) return fail(res, 400, "单次订单商品种类不能超过 30 个");
     const quantities = new Map();
     for (const item of items) {
-      const product = db.products.find((productItem) => productItem.id === Number(item.productId));
+      const product = findProductById(item.productId);
       if (!product) return fail(res, 404, "商品不存在");
       const quantity = Number(item.quantity || 1);
       if (!validInteger(quantity, 1, product.stock)) return fail(res, 400, `${product.name} 数量必须是 1 到 ${product.stock} 之间的整数`);
       quantities.set(product.id, Number(quantities.get(product.id) || 0) + quantity);
     }
     const orderItems = [...quantities.entries()].map(([productId, quantity]) => {
-      const product = db.products.find((item) => item.id === productId);
+      const product = findProductById(productId);
       return { productId: product.id, name: product.name, price: product.price, quantity };
     });
-    const overStockItem = orderItems.find((item) => db.products.find((product) => product.id === item.productId).stock < item.quantity);
+    const overStockItem = orderItems.find((item) => findProductById(item.productId).stock < item.quantity);
     if (overStockItem) {
-      const product = db.products.find((item) => item.id === overStockItem.productId);
+      const product = findProductById(overStockItem.productId);
       return fail(res, 409, `${product.name} 数量必须是 1 到 ${product.stock} 之间的整数`);
     }
     for (const item of orderItems) {
-      const product = db.products.find((productItem) => productItem.id === item.productId);
+      const product = findProductById(item.productId);
       product.stock -= item.quantity;
     }
     const total = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -567,7 +368,7 @@ async function handleFrontApi(req, res, url) {
     };
     db.orders.push(order);
     for (const item of orderItems) {
-      const product = db.products.find((productItem) => productItem.id === item.productId);
+      const product = findProductById(item.productId);
       if (product) await persistProduct(product);
     }
     await persistOrder(order);
@@ -577,11 +378,11 @@ async function handleFrontApi(req, res, url) {
 
   if (method === "POST" && url.pathname.match(/^\/api\/orders\/\d+\/pay$/)) {
     const id = Number(url.pathname.split("/")[3]);
-    const order = db.orders.find((item) => item.id === id);
+    const order = findOrderById(id);
     if (!order) return fail(res, 404, "订单不存在");
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再支付订单");
-    if (order.userId && order.userId !== user.id) return fail(res, 403, "不能支付其他用户的订单");
+    if (order.userId && !userOwnsOrder(order, user)) return fail(res, 403, "不能支付其他用户的订单");
     if (order.status === "已取消") return fail(res, 409, "订单已取消，不能继续支付");
     if (order.status === "已支付" || order.paymentReviewStatus === "approved") return ok(res, order, "订单已经支付");
     if (order.paymentReviewStatus === "pending") return ok(res, order, "付款信息已提交，请等待后台审核");
@@ -631,11 +432,11 @@ async function handleFrontApi(req, res, url) {
 
   if (method === "DELETE" && url.pathname.startsWith("/api/reservations/")) {
     const id = Number(url.pathname.split("/").pop());
-    const reservation = db.reservations.find((item) => item.id === id);
+    const reservation = findReservationById(id);
     if (!reservation) return fail(res, 404, "预约不存在");
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再取消预约");
-    if (reservation.userId !== user.id) return fail(res, 403, "不能取消其他用户的预约");
+    if (!userOwnsReservation(reservation, user)) return fail(res, 403, "不能取消其他用户的预约");
     reservation.status = "已取消";
     await persistReservation(reservation);
     return ok(res, reservation, "预约已取消");
@@ -643,7 +444,7 @@ async function handleFrontApi(req, res, url) {
 
   if (method === "POST" && url.pathname.match(/^\/api\/activities\/\d+\/apply$/)) {
     const id = Number(url.pathname.split("/")[3]);
-    const activity = db.activities.find((item) => item.id === id);
+    const activity = findActivityById(id);
     if (!activity) return fail(res, 404, "活动不存在");
     const user = currentUser(req);
     const kind = body.kind === "early" ? "early" : "regular";
@@ -663,7 +464,7 @@ async function handleFrontApi(req, res, url) {
       if (used >= quota) return fail(res, 409, `${user.level}每月可提前报名 ${quota} 次，您本月已用完`);
     }
     if (activity.applied + people > activity.capacity) return fail(res, 409, `活动仅剩 ${activity.capacity - activity.applied} 个名额`);
-    const duplicated = db.activityApplications.some((item) => item.activityId === activity.id && ((user && item.userId === user.id) || item.phone === phone));
+    const duplicated = hasAppliedActivity(activity.id, user, phone);
     if (duplicated) return fail(res, 409, "您已经报名过该活动");
     const application = { id: nextId(db.activityApplications), activityId: activity.id, userId: user?.id || 0, phone, people, kind, createdAt: new Date().toISOString() };
     db.activityApplications.push(application);
