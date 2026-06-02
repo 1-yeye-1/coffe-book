@@ -2,46 +2,54 @@ const API_BASE = import.meta.env.VITE_API_BASE
   || window.COFFEE_BOOK_API
   || "http://localhost:4173";
 
-export async function request(path, options = {}) {
-  const token = localStorage.getItem("coffee_token") || "";
+export class ApiError extends Error {
+  constructor(message, status = 0, payload = null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
+function tokenFor(scope) {
+  return localStorage.getItem(scope === "admin" ? "coffee_admin_token" : "coffee_token") || "";
+}
+
+function normalizeBody(body) {
+  if (body === undefined || body === null || typeof body === "string" || body instanceof FormData) return body;
+  return JSON.stringify(body);
+}
+
+async function apiRequest(path, options = {}, scope = "user") {
+  const token = tokenFor(scope);
+  const headers = {
+    ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers || {})
+  };
   let response;
 
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(options.headers || {})
-      }
+      headers,
+      body: normalizeBody(options.body)
     });
   } catch {
-    throw new Error("无法连接后端服务，请确认 backend 已启动在 http://localhost:4173");
+    throw new ApiError("无法连接后端服务，请确认 backend 已启动在 http://localhost:4173");
   }
 
   const body = await response.json().catch(() => null);
-  if (!body?.success) throw new Error(body?.message || "请求失败");
+  if (!response.ok || !body?.success) {
+    throw new ApiError(body?.message || "请求失败", response.status, body);
+  }
   return body.data;
 }
 
-export async function adminRequest(path, options = {}) {
-  const token = localStorage.getItem("coffee_admin_token") || "";
-  let response;
+export function request(path, options = {}) {
+  return apiRequest(path, options, "user");
+}
 
-  try {
-    response = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(options.headers || {})
-      }
-    });
-  } catch {
-    throw new Error("无法连接后端服务，请确认 backend 已启动在 http://localhost:4173");
-  }
-
-  const body = await response.json().catch(() => null);
-  if (!body?.success) throw new Error(body?.message || "请求失败");
-  return body.data;
+export function adminRequest(path, options = {}) {
+  return apiRequest(path, options, "admin");
 }

@@ -100,6 +100,7 @@ npm run dev      # 同时启动后端和前端
 npm run build    # 前端生产构建
 npm run lint     # package/json、后端与脚本语法、冲突标记检查
 npm run test     # 后端核心接口冒烟测试
+npm run test:e2e # Playwright 浏览器端到端流程测试
 ```
 
 前端单独启动：

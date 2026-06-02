@@ -237,7 +237,7 @@ async function submit() {
 
 <template>
   <section class="section auth-page">
-    <form class="card login-card vue-login" @submit.prevent="submit" novalidate>
+    <form class="card login-card vue-login" data-testid="login-form" @submit.prevent="submit" novalidate>
       <p class="eyebrow">Member Login</p>
       <h2>用户登录</h2>
       <p class="muted">未登录用户进入购物车、结算、支付和订单页时会先跳转到这里。</p>
@@ -255,6 +255,7 @@ async function submit() {
           inputmode="numeric"
           maxlength="11"
           autocomplete="tel"
+          data-testid="login-phone"
           placeholder="请输入 11 位手机号"
           :aria-invalid="Boolean(fieldErrors.phone)"
           @input="clearField('phone')"
@@ -269,6 +270,7 @@ async function submit() {
           :class="{ invalid: fieldErrors.password }"
           type="password"
           autocomplete="current-password"
+          data-testid="login-password"
           placeholder="请输入密码"
           :aria-invalid="Boolean(fieldErrors.password)"
           @input="clearField('password')"
@@ -318,7 +320,7 @@ async function submit() {
 
       <p v-if="notice" class="form-notice">{{ notice }}</p>
       <p v-if="error" class="form-error">{{ error }}</p>
-      <button class="btn checkout-main-btn" type="submit" :disabled="loading">
+      <button class="btn checkout-main-btn" data-testid="login-submit" type="submit" :disabled="loading">
         {{ loading ? "登录中..." : "登录并继续" }}
       </button>
       <RouterLink class="link-button auth-switch" to="/register">还没有账号？去注册</RouterLink>

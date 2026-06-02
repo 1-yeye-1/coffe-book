@@ -2568,3 +2568,198 @@ button[disabled] {
     flex-direction: column;
   }
 }
+
+.home-hero {
+  position: relative;
+  overflow: hidden;
+  min-height: clamp(500px, 70vh, 720px);
+  align-items: center;
+}
+
+.home-hero::before {
+  content: "";
+  position: absolute;
+  inset: auto 6% 6% auto;
+  width: min(360px, 32vw);
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.featured-card,
+.timeline-card,
+.product-card,
+.rich-order-card {
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.featured-card:hover,
+.timeline-card:hover,
+.product-card:hover,
+.rich-order-card:hover {
+  border-color: rgba(50, 106, 93, 0.28);
+  box-shadow: 0 22px 52px rgba(48, 36, 29, 0.15);
+  transform: translateY(-3px);
+}
+
+.catalog-toolbar,
+.admin-table-tools {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 180px auto;
+  gap: 12px;
+  align-items: end;
+  margin: 0 0 18px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 10px 28px rgba(61, 42, 31, 0.07);
+}
+
+.catalog-toolbar label,
+.admin-table-tools label {
+  display: grid;
+  gap: 6px;
+}
+
+.catalog-toolbar span,
+.admin-table-tools span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.catalog-toolbar input,
+.catalog-toolbar select,
+.admin-table-tools input,
+.admin-table-tools select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: white;
+}
+
+.admin-table-tools {
+  grid-template-columns: minmax(220px, 1fr) minmax(140px, 180px) 110px auto;
+}
+
+.admin-pagination {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.state-card {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  width: 100%;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 12px 28px rgba(61, 42, 31, 0.08);
+}
+
+.state-card strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.state-card p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.state-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  color: white;
+  background: var(--green);
+  font-weight: 900;
+}
+
+.loading-state .state-icon {
+  border: 4px solid rgba(50, 106, 93, 0.16);
+  border-top-color: var(--green);
+  background: transparent;
+  animation: stateSpin 0.8s linear infinite;
+}
+
+.error-state .state-icon {
+  background: var(--rose);
+}
+
+.empty-state-rich .state-icon {
+  color: var(--ink);
+  background: #f4d28a;
+}
+
+.reservation-workbench {
+  align-items: start;
+}
+
+.reservation-form {
+  position: sticky;
+  top: 92px;
+}
+
+.admin-sidebar {
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+}
+
+.table-card table {
+  min-width: 760px;
+}
+
+.table-card {
+  overflow-x: auto;
+}
+
+.confirm-modal {
+  max-width: 460px;
+}
+
+@keyframes stateSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 920px) {
+  .catalog-toolbar,
+  .admin-table-tools {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin-pagination {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 620px) {
+  .catalog-toolbar,
+  .admin-table-tools,
+  .state-card {
+    grid-template-columns: 1fr;
+  }
+
+  .reservation-form {
+    position: static;
+  }
+
+  .home-hero::before {
+    display: none;
+  }
+}

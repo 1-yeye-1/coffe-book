@@ -47,16 +47,20 @@ for (const file of packageFiles) assertJson(file);
 
 const backendFiles = walk(path.join(root, "backend"), (file) => file.endsWith(".js"));
 const scriptFiles = walk(path.join(root, "scripts"), (file) => file.endsWith(".js"));
+const e2eFiles = walk(path.join(root, "tests"), (file) => file.endsWith(".js") || file.endsWith(".mjs"));
+const rootNodeFiles = [
+  path.join(root, "playwright.config.mjs")
+].filter((file) => fs.existsSync(file));
 const frontNodeFiles = [
   path.join(root, "front/server.js"),
   ...walk(path.join(root, "front/scripts"), (file) => file.endsWith(".js"))
 ].filter((file) => fs.existsSync(file));
 
-for (const file of [...backendFiles, ...scriptFiles, ...frontNodeFiles]) {
+for (const file of [...backendFiles, ...scriptFiles, ...e2eFiles, ...rootNodeFiles, ...frontNodeFiles]) {
   checkNodeSyntax(file);
 }
 
-for (const dir of ["backend", "front/src", "scripts"]) {
+for (const dir of ["backend", "front/src", "scripts", "tests"]) {
   for (const file of walk(path.join(root, dir), (item) => /\.(js|mjs|vue|css|html)$/.test(item))) {
     assertNoConflictMarkers(file);
   }

@@ -94,7 +94,7 @@ async function submit() {
 </script>
 
 <template>
-  <section class="section checkout-page">
+  <section class="section checkout-page" data-testid="checkout-page">
     <div class="section-head">
       <div>
         <h2>确认订单</h2>
@@ -102,7 +102,7 @@ async function submit() {
       </div>
     </div>
 
-    <form v-if="cartStore.selectedItems.length" class="checkout-layout" @submit.prevent="submit">
+    <form v-if="cartStore.selectedItems.length" class="checkout-layout" data-testid="checkout-form" @submit.prevent="submit">
       <div class="checkout-left">
         <div class="card order-flow-card">
           <div class="flow-steps"><span class="active">购物车</span><span class="active">确认订单</span><span>模拟支付</span><span>支付成功</span></div>
@@ -133,8 +133,8 @@ async function submit() {
             </label>
           </div>
           <div class="form-grid">
-            <label class="field"><span>联系人</span><input v-model.trim="form.contactName" maxlength="30" required /></label>
-            <label class="field"><span>手机号</span><input v-model.trim="form.phone" inputmode="numeric" maxlength="11" required /></label>
+            <label class="field"><span>联系人</span><input v-model.trim="form.contactName" data-testid="checkout-contact" maxlength="30" required /></label>
+            <label class="field"><span>手机号</span><input v-model.trim="form.phone" data-testid="checkout-phone" inputmode="numeric" maxlength="11" required /></label>
           </div>
           <label class="field"><span>备注</span><textarea v-model.trim="form.remark" rows="3" maxlength="120" placeholder="例如：少糖、礼品包装、预计到店时间"></textarea></label>
         </div>
@@ -156,7 +156,7 @@ async function submit() {
         <div class="price-line"><span>积分抵扣</span><strong class="discount">-￥{{ price.pointsDeduction.toFixed(2) }}</strong></div>
         <div class="price-line total"><span>实付金额</span><strong>￥{{ price.payAmount.toFixed(2) }}</strong></div>
         <p v-if="error" class="form-error">{{ error }}</p>
-        <button class="btn checkout-main-btn" type="submit" :disabled="loading">{{ loading ? "正在创建订单..." : "提交订单并支付" }}</button>
+        <button class="btn checkout-main-btn" data-testid="submit-order" type="submit" :disabled="loading">{{ loading ? "正在创建订单..." : "提交订单并支付" }}</button>
         <p class="muted">订单创建复用后端 `/api/orders`，扩展结算信息保存在 Pinia + localStorage。</p>
       </aside>
     </form>

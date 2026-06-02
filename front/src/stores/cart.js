@@ -60,12 +60,6 @@ export const useCartStore = defineStore("cart", {
       const safeQuantity = normalizeQuantity(quantity, maxQuantity);
       const existed = this.items.find((item) => item.productId === product.id);
       const nextQuantity = normalizeQuantity(Number(existed?.quantity || 0) + safeQuantity, maxQuantity);
-      if (syncBackend) {
-        await request("/api/cart", {
-          method: "POST",
-          body: JSON.stringify({ productId: product.id, quantity: safeQuantity })
-        });
-      }
       if (existed) {
         existed.quantity = nextQuantity;
         existed.stock = maxQuantity;
@@ -82,6 +76,12 @@ export const useCartStore = defineStore("cart", {
       }
       if (!this.selectedIds.includes(String(product.id))) this.selectedIds.push(String(product.id));
       this.saveCart();
+      if (syncBackend) {
+        await request("/api/cart", {
+          method: "POST",
+          body: JSON.stringify({ productId: product.id, quantity: safeQuantity })
+        });
+      }
     },
 
     updateQuantity(productId, quantity) {
