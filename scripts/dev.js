@@ -2,7 +2,6 @@ const { spawn } = require("child_process");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const env = { ...process.env };
 
 if (env.Path && env.PATH) delete env.Path;
@@ -16,20 +15,32 @@ const processes = [
   },
   {
     name: "front",
-    command: npmCommand,
-    args: ["run", "dev"],
+    command: process.execPath,
+    args: ["scripts/dev.js"],
     cwd: path.join(root, "front")
   }
 ];
 
-const children = processes.map((item) => {
-  const child = spawn(item.command, item.args, {
-    cwd: item.cwd,
-    env,
-    stdio: "inherit",
-    shell: false
-  });
+const children = [];
 
+for (const item of processes) {
+  let child;
+  try {
+    child = spawn(item.command, item.args, {
+      cwd: item.cwd,
+      env,
+      stdio: "inherit",
+      shell: false
+    });
+  } catch (error) {
+    console.error(`[${item.name}] failed to start: ${error.message}`);
+    stopAll(1);
+  }
+
+  child.on("error", (error) => {
+    console.error(`[${item.name}] failed to start: ${error.message}`);
+    stopAll(1);
+  });
   child.on("exit", (code) => {
     if (code && code !== 0) {
       console.error(`[${item.name}] exited with code ${code}`);
@@ -37,8 +48,8 @@ const children = processes.map((item) => {
     }
   });
 
-  return child;
-});
+  children.push(child);
+}
 
 function stopAll(code = 0) {
   for (const child of children) {
