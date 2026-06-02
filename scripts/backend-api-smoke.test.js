@@ -43,7 +43,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function request(pathname, options = {}) {
+async function requestRaw(pathname, options = {}) {
   const response = await fetch(`${API}${pathname}`, {
     method: options.method || "GET",
     headers: {
@@ -53,10 +53,23 @@ async function request(pathname, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   const body = await response.json().catch(() => null);
+  return { response, body };
+}
+
+async function request(pathname, options = {}) {
+  const { response, body } = await requestRaw(pathname, options);
   if (!response.ok || !body?.success) {
     throw new Error(`${options.method || "GET"} ${pathname} failed: ${response.status} ${body?.message || response.statusText}`);
   }
   return body.data;
+}
+
+async function expectRejected(pathname, options = {}, expectedStatus = 401) {
+  const { response, body } = await requestRaw(pathname, options);
+  if (response.status !== expectedStatus || body?.success) {
+    throw new Error(`${options.method || "GET"} ${pathname} expected ${expectedStatus}, got ${response.status}`);
+  }
+  return body;
 }
 
 async function waitForServer() {
@@ -147,6 +160,8 @@ async function main() {
     return summary;
   });
 
+  await step("admin api rejects missing token", () => expectRejected("/api/admin/summary", {}, 401));
+
   const testProduct = await step("admin product management", async () => {
     const product = await request("/api/admin/products", {
       method: "POST",
@@ -202,12 +217,16 @@ async function main() {
 
   const demoPhone = "13800000000";
   const smsLoginCode = await step("send sms-login code", () => sendSms(demoPhone));
-  await step("user sms login", () => request("/api/auth/sms-login", {
+  const demoSession = await step("user sms login", () => request("/api/auth/sms-login", {
     method: "POST",
     body: { phone: demoPhone, smsCode: smsLoginCode }
   }));
 
   const token = loginSession.token || session.token;
+
+  await step("member api rejects missing token", () => expectRejected("/api/member", {}, 401));
+
+  await step("user token cannot access admin api", () => expectRejected("/api/admin/summary", { token }, 401));
 
   await step("profile update", () => request("/api/member/profile", {
     method: "PATCH",
@@ -244,6 +263,8 @@ async function main() {
   }));
   created.orderId = order.id;
 
+  await step("order ownership guard", () => expectRejected(`/api/orders/${order.id}/payment-status`, { token: demoSession.token }, 403));
+
   await step("payment submit", () => request(`/api/orders/${order.id}/pay`, {
     method: "POST",
     token,
@@ -276,6 +297,11 @@ async function main() {
     }
   }));
   created.reservationId = reservation.id;
+
+  await step("reservation ownership guard", () => expectRejected(`/api/reservations/${reservation.id}`, {
+    method: "DELETE",
+    token: demoSession.token
+  }, 403));
 
   await step("my reservations", async () => {
     const member = await request("/api/member", { token });

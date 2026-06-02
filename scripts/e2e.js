@@ -72,6 +72,12 @@ function stopServices() {
   for (const child of services.reverse()) killTree(child);
 }
 
+function warnCleanup(message) {
+  if (process.env.E2E_VERBOSE_CLEANUP === "1") {
+    console.warn(`[e2e] cleanup skipped: ${message}`);
+  }
+}
+
 async function apiJson(pathname, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeout || 15_000);
@@ -105,6 +111,7 @@ async function cleanupData() {
     const textIncludesRun = (item) => JSON.stringify(item).includes(runId);
     const cleanupTargets = [
       ...(summary.orders || []).filter(textIncludesRun).map((item) => [`/api/admin/orders/${item.id}`, "order"]),
+      ...(summary.reservations || []).filter(textIncludesRun).map((item) => [`/api/admin/reservations/${item.id}`, "reservation"]),
       ...(summary.products || []).filter(textIncludesRun).map((item) => [`/api/admin/products/${item.id}`, "product"]),
       ...(summary.posts || []).filter(textIncludesRun).map((item) => [`/api/admin/posts/${item.id}`, "post"])
     ];
@@ -113,11 +120,11 @@ async function cleanupData() {
       try {
         await apiJson(pathname, { method: "DELETE", token: admin.token });
       } catch (error) {
-        console.warn(`[e2e] cleanup skipped ${label}: ${error.message}`);
+        warnCleanup(`${label}: ${error.message}`);
       }
     }
   } catch (error) {
-    console.warn(`[e2e] cleanup skipped: ${error.message}`);
+    warnCleanup(error.message);
   }
 }
 

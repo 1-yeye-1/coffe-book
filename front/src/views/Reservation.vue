@@ -130,7 +130,7 @@ async function submit() {
       <label class="field"><span>人数</span><input v-model.number="form.people" data-testid="reservation-people" type="number" min="1" max="12" step="1" required /></label>
       <label class="field"><span>预留手机号</span><input v-model.trim="form.phone" data-testid="reservation-phone" type="tel" maxlength="11" required /></label>
       <label class="field"><span>用途</span><select v-model="form.purpose"><option>阅读自习</option><option>朋友聚会</option><option>活动沙龙</option></select></label>
-      <label class="field"><span>特殊需求</span><textarea v-model.trim="form.note" rows="3" maxlength="120" placeholder="靠窗、插座、安静区等"></textarea></label>
+      <label class="field"><span>特殊需求</span><textarea v-model.trim="form.note" data-testid="reservation-note" rows="3" maxlength="120" placeholder="靠窗、插座、安静区等"></textarea></label>
       <button class="btn" data-testid="submit-reservation" type="submit">提交预约</button>
     </form>
   </section>

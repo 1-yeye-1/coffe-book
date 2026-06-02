@@ -545,7 +545,7 @@ function adminRows(key) {
     </div>
 
     <div v-if="confirmDialog.visible" class="admin-modal-overlay">
-      <article class="card admin-modal confirm-modal">
+      <article class="card admin-modal confirm-modal" data-testid="admin-confirm-modal">
         <div class="admin-modal-head">
           <div>
             <h3>{{ confirmDialog.title }}</h3>
@@ -554,8 +554,8 @@ function adminRows(key) {
           <button class="icon-button" type="button" @click="closeConfirm">×</button>
         </div>
         <div class="admin-modal-actions">
-          <button class="btn ghost" type="button" @click="closeConfirm">取消</button>
-          <button class="btn danger" type="button" @click="confirmRemove">确认删除</button>
+          <button class="btn ghost" data-testid="admin-confirm-cancel" type="button" @click="closeConfirm">取消</button>
+          <button class="btn danger" data-testid="admin-confirm-delete" type="button" @click="confirmRemove">确认删除</button>
         </div>
       </article>
     </div>
