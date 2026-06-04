@@ -25,6 +25,14 @@ const {
   persistUser
 } = require("./shared/mysql");
 const { adminSummary } = require("./modules/admin-summary");
+const {
+  adminPaymentRows,
+  confirmOrderPayment,
+  confirmPayment,
+  findPaymentById,
+  rejectOrderPayment,
+  rejectPayment
+} = require("./modules/payments");
 const { auditActivity } = require("./shared/audit");
 const { nextId, validBirthday, validEmail, validNonNegativeInteger, validNonNegativeNumber, validPeople, validPhone } = require("./shared/validators");
 
@@ -63,6 +71,37 @@ async function handleAdminApi(req, res, url) {
     detail
   });
   if (method === "GET" && url.pathname === "/api/admin/summary") return ok(res, await adminSummary());
+  if (method === "GET" && url.pathname === "/api/admin/payments") {
+    return ok(res, adminPaymentRows(url.searchParams.get("status") || "submitted"));
+  }
+  if (method === "POST" && url.pathname.match(/^\/api\/admin\/payments\/\d+\/confirm$/)) {
+    const paymentId = Number(url.pathname.split("/")[4]);
+    const payment = findPaymentById(paymentId);
+    if (!payment) return fail(res, 404, "支付记录不存在");
+    const order = db.orders.find((item) => item.id === payment.orderId);
+    if (!order) return fail(res, 404, "订单不存在");
+    try {
+      await confirmPayment(payment, order, admin.id);
+      await auditAdmin("确认收款", "payment", payment.id, `订单 #${order.id} 已确认收款`);
+      return ok(res, { payment, order }, "确认收款成功");
+    } catch (error) {
+      return fail(res, 409, error.message);
+    }
+  }
+  if (method === "POST" && url.pathname.match(/^\/api\/admin\/payments\/\d+\/reject$/)) {
+    const paymentId = Number(url.pathname.split("/")[4]);
+    const payment = findPaymentById(paymentId);
+    if (!payment) return fail(res, 404, "支付记录不存在");
+    const order = db.orders.find((item) => item.id === payment.orderId);
+    if (!order) return fail(res, 404, "订单不存在");
+    try {
+      await rejectPayment(payment, order, admin.id, body.orderStatus || "pending_payment");
+      await auditAdmin("驳回收款", "payment", payment.id, `订单 #${order.id} 支付审核已驳回`);
+      return ok(res, { payment, order }, "支付审核已驳回");
+    } catch (error) {
+      return fail(res, 409, error.message);
+    }
+  }
   if (method === "GET" && url.pathname === "/api/admin/realtime") {
     const pageSize = Math.min(30, Math.max(1, Number(url.searchParams.get("pageSize") || 10)));
     const total = db.realtime.length;
@@ -255,8 +294,10 @@ async function handleAdminApi(req, res, url) {
       address: body.address || "",
       items: Array.isArray(body.items) ? body.items : [],
       total: Number(body.total || 0),
-      status: body.status || "待支付",
+      status: body.status || "pending_payment",
       paymentMethod: body.paymentMethod || "",
+      paidAt: "",
+      cancelledAt: "",
       paymentReviewStatus: "not_submitted",
       paymentSubmittedAt: "",
       paymentReviewedAt: "",
@@ -295,28 +336,8 @@ async function handleAdminApi(req, res, url) {
       return fail(res, 409, order.paymentReviewStatus === "approved" ? "该订单已审核通过" : "该订单当前没有待审核付款");
     }
 
-    order.paymentReviewStatus = body.status;
-    order.paymentReviewedAt = new Date().toISOString();
-    order.paymentReviewedBy = admin.id;
-
-    if (body.status === "approved") {
-      order.status = "已支付";
-      order.paidAt = order.paymentReviewedAt;
-      const user = db.users.find((item) => item.id === order.userId);
-      if (user) {
-        order.earnedPoints = Math.max(1, Math.floor(order.total));
-        order.earnedProgress = Math.max(1, Math.ceil(order.total * 0.5));
-        user.points = Number(user.points || 0) + order.earnedPoints;
-        user.levelProgress = Number(user.levelProgress || 0) + order.earnedProgress;
-        user.notifications = [`订单 #${order.id} 付款审核已通过，获得 ${order.earnedPoints} 积分和 ${order.earnedProgress} 等级度`, ...(user.notifications || [])].slice(0, 30);
-        await persistUser(user);
-      }
-    } else {
-      order.status = "待支付";
-      order.paidAt = "";
-    }
-
-    await persistOrder(order);
+    if (body.status === "approved") await confirmOrderPayment(order, admin.id);
+    else await rejectOrderPayment(order, admin.id, "pending_payment");
     await auditAdmin(body.status === "approved" ? "通过付款审核" : "驳回付款审核", "order", order.id, `订单 #${order.id} 付款审核${body.status === "approved" ? "通过" : "驳回"}`);
     return ok(res, order, body.status === "approved" ? "付款审核已通过" : "付款审核已驳回");
   }

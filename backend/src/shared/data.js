@@ -14,6 +14,10 @@ function nowText() {
   }).replaceAll("/", "-");
 }
 
+function isPaidOrder(order) {
+  return ["已支付", "paid", "completed"].includes(String(order?.status || ""));
+}
+
 const db = {
   users: [
     {
@@ -108,6 +112,7 @@ const db = {
     { id: 2, userId: 1, phone: "13800000000", seatId: "C4,C5", date: today(), time: "19:00", people: "2", purpose: "朋友聚会", note: "靠窗", status: "已预约" }
   ],
   orders: [],
+  payments: [],
   books: [
     { id: 1, title: "夜航西飞", author: "柏瑞尔·马卡姆", category: "文学", ranking: "周榜第 1", summary: "一位女性飞行员在非洲大陆上的生命回忆。文字克制而开阔，适合在安静的下午慢慢阅读。", publisher: "人民文学出版社", publishedAt: "2025-08-15 10:00:00", image: "https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=900&q=80" },
     { id: 2, title: "置身事内", author: "兰小欢", category: "商业", ranking: "月榜第 2", summary: "从地方政府投融资切入，理解中国经济运行的现实逻辑。适合希望建立商业与公共治理视角的读者。", publisher: "上海人民出版社", publishedAt: "2025-11-02 09:30:00", image: "https://images.unsplash.com/photo-1495446815901-a7297e633e8d?auto=format&fit=crop&w=900&q=80" },
@@ -204,12 +209,12 @@ function dashboardData() {
     growth: [36, 42, 52, 48, 64, 72, 86, 80, 94, 100],
     realtime: db.realtime.slice(0, 5),
     realtimeCount: db.realtime.length,
-    income: db.orders.filter((item) => item.status === "已支付").reduce((sum, item) => sum + Number(item.total || 0), 0)
+    income: db.orders.filter(isPaidOrder).reduce((sum, item) => sum + Number(item.total || 0), 0)
   };
 }
 
 function incomeData() {
-  const paidOrders = db.orders.filter((item) => item.status === "已支付");
+  const paidOrders = db.orders.filter(isPaidOrder);
   return {
     total: paidOrders.reduce((sum, item) => sum + Number(item.total || 0), 0),
     count: paidOrders.length,

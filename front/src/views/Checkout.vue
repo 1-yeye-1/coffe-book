@@ -84,7 +84,7 @@ async function submit() {
       coupon: form.coupon,
       ...price.value
     });
-    router.push(`/payment/${order.id}`);
+    router.push(`/pay/${order.id}`);
   } catch (err) {
     error.value = err.message;
   } finally {

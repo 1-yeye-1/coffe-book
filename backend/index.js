@@ -33,7 +33,12 @@ function apiIndex() {
       redeemReward: "POST /api/member/redeem",
       useGift: "POST /api/member/gifts/:id/use",
       createOrder: "POST /api/orders",
+      createPayment: "POST /api/payments/create",
+      submitPayment: "POST /api/payments/submit",
+      paymentStatus: "GET /api/payments/order/:orderId",
+      cancelPayment: "POST /api/payments/cancel",
       adminLogin: "POST /api/admin/login",
+      adminPayments: "GET /api/admin/payments",
       adminSummary: "GET /api/admin/summary"
     }
   };

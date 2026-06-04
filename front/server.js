@@ -29,7 +29,8 @@ function sendFile(res, filePath) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const safePath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+  const htmlPath = url.pathname.startsWith("/admin/") ? "/admin.html" : "/index.html";
+  const safePath = decodeURIComponent(url.pathname === "/" ? htmlPath : url.pathname);
   const filePath = path.normalize(path.join(ROOT, safePath));
 
   if (path.relative(ROOT, filePath).startsWith("..")) {
@@ -40,7 +41,7 @@ const server = http.createServer((req, res) => {
 
   const target = fs.existsSync(filePath) && fs.statSync(filePath).isFile()
     ? filePath
-    : path.join(ROOT, "index.html");
+    : path.join(ROOT, htmlPath);
 
   sendFile(res, target);
 });

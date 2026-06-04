@@ -3,7 +3,18 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    {
+      name: "coffee-admin-routes",
+      configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          if (req.url?.startsWith("/admin/")) req.url = "/admin.html";
+          next();
+        });
+      }
+    }
+  ],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url))

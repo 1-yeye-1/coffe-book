@@ -22,6 +22,16 @@ const { getUserCart, setUserCart } = require("./modules/cart");
 const { communityProfile, publicComment, publicPost } = require("./modules/community");
 const { earlySignupQuota, memberData, memberLevels, normalizeMember, pointRewards } = require("./modules/member");
 const { findOrderById, userOwnsOrder } = require("./modules/orders");
+const {
+  apiBaseFromRequest,
+  cancelPayment,
+  createPayment,
+  findPaymentById,
+  latestPaymentForOrder,
+  markPaymentExpiredIfNeeded,
+  paymentPayload,
+  submitPayment
+} = require("./modules/payments");
 const { findBookById, findProductById, listBooks, listProducts } = require("./modules/products");
 const { findReservationById, userOwnsReservation } = require("./modules/reservations");
 const QRCode = require("qrcode");
@@ -89,8 +99,68 @@ async function handleFrontApi(req, res, url) {
     if (!userOwnsOrder(order, user)) return fail(res, 403, "不能查询其他用户的订单");
     return ok(res, order);
   }
+  if (method === "GET" && url.pathname.match(/^\/api\/payments\/order\/\d+$/)) {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再查询支付状态");
+    const orderId = Number(url.pathname.split("/").pop());
+    const order = findOrderById(orderId);
+    if (!order) return fail(res, 404, "订单不存在");
+    if (!userOwnsOrder(order, user)) return fail(res, 403, "不能查询其他用户的订单");
+    const payment = latestPaymentForOrder(order.id);
+    if (payment) await markPaymentExpiredIfNeeded(payment, order);
+    return ok(res, {
+      order,
+      payment: payment ? paymentPayload(payment, order, apiBaseFromRequest(req)) : null
+    });
+  }
 
   const body = await parseBody(req);
+
+  if (method === "POST" && url.pathname === "/api/payments/create") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再创建支付");
+    const order = findOrderById(body.orderId);
+    if (!order) return fail(res, 404, "订单不存在");
+    if (!userOwnsOrder(order, user)) return fail(res, 403, "不能支付其他用户的订单");
+    try {
+      const payment = await createPayment(order, body.method, apiBaseFromRequest(req));
+      return ok(res, payment, "支付记录已创建");
+    } catch (error) {
+      return fail(res, 409, error.message);
+    }
+  }
+
+  if (method === "POST" && url.pathname === "/api/payments/submit") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再提交支付");
+    const payment = body.paymentId ? findPaymentById(body.paymentId) : latestPaymentForOrder(body.orderId);
+    if (!payment) return fail(res, 404, "支付记录不存在");
+    const order = findOrderById(payment.orderId);
+    if (!order) return fail(res, 404, "订单不存在");
+    if (!userOwnsOrder(order, user)) return fail(res, 403, "不能提交其他用户的支付记录");
+    try {
+      await submitPayment(payment, order);
+      return ok(res, paymentPayload(payment, order, apiBaseFromRequest(req)), "已提交支付，等待后台确认收款");
+    } catch (error) {
+      return fail(res, 409, error.message);
+    }
+  }
+
+  if (method === "POST" && url.pathname === "/api/payments/cancel") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再取消支付");
+    const payment = body.paymentId ? findPaymentById(body.paymentId) : latestPaymentForOrder(body.orderId);
+    if (!payment) return fail(res, 404, "支付记录不存在");
+    const order = findOrderById(payment.orderId);
+    if (!order) return fail(res, 404, "订单不存在");
+    if (!userOwnsOrder(order, user)) return fail(res, 403, "不能取消其他用户的支付记录");
+    try {
+      await cancelPayment(payment, order);
+      return ok(res, paymentPayload(payment, order, apiBaseFromRequest(req)), "订单已取消");
+    } catch (error) {
+      return fail(res, 409, error.message);
+    }
+  }
 
   if (method === "POST" && url.pathname === "/api/auth/sms-code") {
     if (!validPhone(body.phone)) return fail(res, 400, "请输入正确的手机号");
@@ -357,7 +427,10 @@ async function handleFrontApi(req, res, url) {
       userName: user.name,
       items: orderItems,
       total,
-      status: "待支付",
+      status: "pending_payment",
+      paymentMethod: "",
+      paidAt: "",
+      cancelledAt: "",
       paymentReviewStatus: "not_submitted",
       paymentSubmittedAt: "",
       paymentReviewedAt: "",
@@ -383,18 +456,15 @@ async function handleFrontApi(req, res, url) {
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再支付订单");
     if (order.userId && !userOwnsOrder(order, user)) return fail(res, 403, "不能支付其他用户的订单");
-    if (order.status === "已取消") return fail(res, 409, "订单已取消，不能继续支付");
-    if (order.status === "已支付" || order.paymentReviewStatus === "approved") return ok(res, order, "订单已经支付");
-    if (order.paymentReviewStatus === "pending") return ok(res, order, "付款信息已提交，请等待后台审核");
-    order.status = "支付审核中";
-    order.paymentMethod = body.paymentMethod || "线上支付";
-    order.paymentReviewStatus = "pending";
-    order.paymentSubmittedAt = new Date().toISOString();
-    order.paymentReviewedAt = "";
-    order.paymentReviewedBy = 0;
-    await persistOrder(order);
-    await auditActivity("提交付款审核", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "order", targetId: order.id, detail: `订单 #${order.id} 已提交付款审核，支付方式：${order.paymentMethod}` });
-    return ok(res, order, "付款信息已提交，请等待后台审核");
+    try {
+      const created = await createPayment(order, body.method || body.paymentMethod, apiBaseFromRequest(req));
+      const payment = latestPaymentForOrder(order.id);
+      await submitPayment(payment, order);
+      await auditActivity("提交付款审核", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "order", targetId: order.id, detail: `订单 #${order.id} 已提交付款审核，支付方式：${created.method}` });
+      return ok(res, order, "付款信息已提交，请等待后台审核");
+    } catch (error) {
+      return fail(res, 409, error.message);
+    }
   }
 
   if (method === "POST" && url.pathname === "/api/reservations") {

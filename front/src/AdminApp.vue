@@ -4,11 +4,16 @@ import AdminTableTools from "@/components/AdminTableTools.vue";
 import { adminRequest } from "@/api";
 
 const adminUser = ref(JSON.parse(localStorage.getItem("coffee_admin_user") || "null"));
-const active = ref("workbench");
+function initialActivePage() {
+  return window.location.pathname === "/admin/payments" ? "payments" : "workbench";
+}
+
+const active = ref(initialActivePage());
 const loading = ref(false);
 const error = ref("");
 const message = ref("");
 const summary = ref(null);
+const payments = ref([]);
 const realtime = ref([]);
 const logDetail = ref(null);
 const modal = reactive({ visible: false, title: "", endpoint: "", method: "POST", fields: [] });
@@ -17,6 +22,7 @@ const adminQuery = ref("");
 const adminStatus = ref("all");
 const adminPage = ref(1);
 const adminPageSize = ref(8);
+const paymentAction = ref("");
 const loginForm = reactive({ account: "admin", password: "admin123" });
 let realtimeTimer = null;
 
@@ -27,6 +33,7 @@ const navItems = [
   ["products", "商品管理"],
   ["books", "书籍管理"],
   ["orders", "订单管理"],
+  ["payments", "支付审核"],
   ["reservations", "预约管理"],
   ["activities", "活动管理"],
   ["community", "社区审核"],
@@ -42,6 +49,7 @@ const rows = computed(() => ({
   products: summary.value?.products || [],
   books: summary.value?.books || [],
   orders: summary.value?.orders || [],
+  payments: payments.value.length ? payments.value : summary.value?.payments || [],
   reservations: summary.value?.reservations || [],
   activities: summary.value?.activities || [],
   activityApplications: summary.value?.activityApplications || [],
@@ -58,6 +66,7 @@ const tableKeyByModule = {
   products: "products",
   books: "books",
   orders: "orders",
+  payments: "payments",
   reservations: "reservations",
   activities: "activities",
   community: "posts",
@@ -88,6 +97,14 @@ const statusOptions = {
     { value: "已支付", label: "已支付" },
     { value: "已取消", label: "已取消" }
   ],
+  payments: [
+    { value: "all", label: "全部支付" },
+    { value: "submitted", label: "待确认收款" },
+    { value: "unpaid", label: "未支付" },
+    { value: "confirmed", label: "已确认" },
+    { value: "failed", label: "已驳回" },
+    { value: "expired", label: "已超时" }
+  ],
   reservations: [
     { value: "all", label: "全部状态" },
     { value: "已预约", label: "已预约" },
@@ -113,6 +130,7 @@ const toolCopy = {
   products: { placeholder: "搜索商品名称、描述、分类或库存", filter: "商品分类" },
   books: { placeholder: "搜索书名、作者、出版社或分类", filter: "书籍筛选" },
   orders: { placeholder: "搜索订单号、用户、商品名或支付状态", filter: "订单筛选" },
+  payments: { placeholder: "搜索订单号、用户、交易号、支付方式或状态", filter: "支付状态" },
   reservations: { placeholder: "搜索座位、手机号、日期或用途", filter: "预约状态" },
   activities: { placeholder: "搜索活动名称、地点、日期或报名手机号", filter: "活动筛选" },
   posts: { placeholder: "搜索动态标题、作者、评论或审核状态", filter: "社区筛选" },
@@ -121,7 +139,9 @@ const toolCopy = {
 };
 const activeToolCopy = computed(() => toolCopy[activeTableKey.value] || { placeholder: "输入关键词搜索当前页面", filter: "筛选" });
 
-watch(active, () => {
+watch(active, (page) => {
+  const targetPath = page === "payments" ? "/admin/payments" : "/admin.html";
+  if (window.location.pathname !== targetPath) window.history.pushState(null, "", targetPath);
   adminStatus.value = "all";
   adminQuery.value = "";
   if (adminUser.value) refresh();
@@ -175,6 +195,7 @@ async function refresh() {
   try {
     const adminSummary = await adminRequest("/api/admin/summary");
     summary.value = adminSummary;
+    if (active.value === "payments") await loadPayments();
     await loadRealtime();
   } catch (err) {
     error.value = err.message;
@@ -189,6 +210,10 @@ async function loadRealtime() {
   realtime.value = log.items || [];
 }
 
+async function loadPayments() {
+  payments.value = await adminRequest("/api/admin/payments?status=all").catch(() => []);
+}
+
 async function showLogDetail(item) {
   logDetail.value = await adminRequest(`/api/admin/realtime/${item.id}`);
 }
@@ -200,6 +225,37 @@ async function reviewPayment(item, status) {
   });
   message.value = status === "approved" ? "付款审核已通过" : "付款审核已驳回";
   await refresh();
+}
+
+async function confirmPaymentRecord(item) {
+  paymentAction.value = `confirm-${item.id}`;
+  error.value = "";
+  try {
+    await adminRequest(`/api/admin/payments/${item.id}/confirm`, { method: "POST" });
+    message.value = `订单 #${item.orderId} 已确认收款`;
+    await refresh();
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+    paymentAction.value = "";
+  }
+}
+
+async function rejectPaymentRecord(item) {
+  paymentAction.value = `reject-${item.id}`;
+  error.value = "";
+  try {
+    await adminRequest(`/api/admin/payments/${item.id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ orderStatus: "pending_payment" })
+    });
+    message.value = `订单 #${item.orderId} 已驳回收款`;
+    await refresh();
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+    paymentAction.value = "";
+  }
 }
 
 async function reviewComment(comment, status) {
@@ -294,8 +350,8 @@ const bookFields = (item = {}) => [
 const orderFields = (item = {}) => [
   { name: "userName", label: "客户名称", value: item.userName || "线下用户" },
   { name: "total", label: "订单金额", value: item.total || 0, type: "number", min: 0, step: "0.01" },
-  { name: "status", label: "订单状态", value: item.status || "待支付", type: "select", options: ["待支付", "支付审核中", "已支付", "已完成", "已取消"] },
-  { name: "paymentMethod", label: "支付方式", value: item.paymentMethod || "" },
+  { name: "status", label: "订单状态", value: item.status || "pending_payment", type: "select", options: [["pending_payment", "待支付"], ["payment_review", "待确认收款"], ["paid", "已支付"], ["completed", "已完成"], ["cancelled", "已取消"]] },
+  { name: "paymentMethod", label: "支付方式", value: item.paymentMethod || "", type: "select", options: [["", "未选择"], ["wechat", "微信支付"], ["alipay", "支付宝"], ["mock", "模拟支付"]] },
   { name: "paidAt", label: "支付时间", value: String(item.paidAt || "").replace(" ", "T").slice(0, 16), type: "datetime-local" }
 ];
 
@@ -337,6 +393,37 @@ function optionLabel(option) {
 
 function reviewLabel(status) {
   return status === "approved" ? "已通过" : status === "rejected" ? "已驳回" : status === "pending" ? "待审核" : "未提交";
+}
+
+function orderStatusLabel(status) {
+  const labels = {
+    pending_payment: "待支付",
+    payment_review: "待确认收款",
+    paid: "已支付",
+    cancelled: "已取消",
+    completed: "已完成"
+  };
+  return labels[status] || status || "-";
+}
+
+function paymentStatusLabel(status) {
+  const labels = {
+    unpaid: "未支付",
+    submitted: "待确认收款",
+    confirmed: "已确认",
+    failed: "已驳回",
+    expired: "已超时"
+  };
+  return labels[status] || status || "-";
+}
+
+function paymentMethodLabel(method) {
+  const labels = {
+    wechat: "微信支付",
+    alipay: "支付宝",
+    mock: "模拟支付"
+  };
+  return labels[method] || method || "-";
 }
 
 function productCategoryLabel(category) {
@@ -398,8 +485,11 @@ function matchesStatus(key, item) {
     if (status === "coffee-order") return orderType(item) === "coffee";
     if (status === "creative-order") return orderType(item) === "creative";
     if (status === "mixed-order") return orderType(item) === "mixed";
-    return String(item.status || "").includes(status) || String(item.paymentReviewStatus || "").includes(status);
+    return String(item.status || "").includes(status)
+      || String(item.paymentReviewStatus || "").includes(status)
+      || orderStatusLabel(item.status).includes(status);
   }
+  if (key === "payments") return String(item.status || "").includes(status);
   if (key === "reservations") return String(item.status || "").includes(status);
   if (key === "posts") {
     if (status === "has-comments") return (item.comments || []).length > 0;
@@ -529,11 +619,40 @@ function adminRows(key) {
           <div class="card table-card"><table><thead><tr><th>书名</th><th>作者</th><th>分类</th><th>收录时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('books')" :key="item.id"><td>{{ item.title }}</td><td>{{ item.author }}</td><td>{{ item.category }}</td><td>{{ item.publishedAt }}</td><td><button class="btn ghost" @click="openModal('编辑书籍', `/api/admin/books/${item.id}`, 'PATCH', bookFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/books/${item.id}`)">删除</button></td></tr></tbody></table></div>
         </section>
 
+        <section v-if="active === 'payments'" class="section" data-testid="admin-payments-table">
+          <div class="card table-card">
+            <h3>支付审核</h3>
+            <p class="muted">用户点击“我已支付”后会进入待确认收款，管理员确认后订单才会变为已支付。</p>
+            <table>
+              <thead><tr><th>订单号</th><th>用户</th><th>金额</th><th>支付方式</th><th>支付状态</th><th>订单状态</th><th>提交时间</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="item in adminRows('payments')" :key="item.id">
+                  <td>#{{ item.orderId }}</td>
+                  <td>{{ item.userName || `用户 #${item.userId || 0}` }}</td>
+                  <td>{{ money(item.amount) }}</td>
+                  <td>{{ paymentMethodLabel(item.method) }}</td>
+                  <td><span class="status">{{ paymentStatusLabel(item.status) }}</span></td>
+                  <td>{{ orderStatusLabel(item.orderStatus) }}</td>
+                  <td>{{ item.submittedAt || '-' }}</td>
+                  <td>
+                    <div v-if="item.status === 'submitted'" class="actions">
+                      <button class="btn" type="button" :disabled="Boolean(paymentAction)" @click="confirmPaymentRecord(item)">{{ paymentAction === `confirm-${item.id}` ? "确认中..." : "确认收款" }}</button>
+                      <button class="btn secondary" type="button" :disabled="Boolean(paymentAction)" @click="rejectPaymentRecord(item)">{{ paymentAction === `reject-${item.id}` ? "驳回中..." : "驳回" }}</button>
+                    </div>
+                    <span v-else class="muted">无需操作</span>
+                  </td>
+                </tr>
+                <tr v-if="!adminRows('payments').length"><td colspan="8">暂无支付审核记录</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <section v-if="active === 'orders'" class="section" data-testid="admin-orders-table">
           <button class="btn" type="button" @click="openModal('新增订单', '/api/admin/orders', 'POST', orderFields())">新增订单</button>
           <div v-for="typeKey in ['coffee', 'creative', 'mixed']" :key="typeKey" class="card table-card">
             <h3>{{ typeKey === 'coffee' ? '咖啡订单' : typeKey === 'creative' ? '文创订单' : '混合订单' }}</h3>
-            <table><thead><tr><th>订单号</th><th>类型</th><th>用户ID</th><th>用户</th><th>商品数</th><th>金额</th><th>状态</th><th>支付</th><th>付款审核</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('orders').filter((order) => orderType(order) === typeKey)" :key="item.id"><td>#{{ item.id }}</td><td>{{ orderTypeLabel(item) }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.userName }}</td><td>{{ item.items?.length || 0 }}</td><td>{{ money(item.total) }}</td><td>{{ item.status }}</td><td>{{ item.paymentMethod || '-' }}</td><td><span class="status">{{ reviewLabel(item.paymentReviewStatus) }}</span><div v-if="item.paymentReviewStatus === 'pending'" class="actions"><button class="btn" type="button" @click="reviewPayment(item, 'approved')">通过</button><button class="btn secondary" type="button" @click="reviewPayment(item, 'rejected')">驳回</button></div></td><td><button class="btn ghost" @click="openModal('编辑订单', `/api/admin/orders/${item.id}`, 'PATCH', orderFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/orders/${item.id}`)">删除</button></td></tr><tr v-if="!adminRows('orders').filter((order) => orderType(order) === typeKey).length"><td colspan="10">暂无{{ typeKey === 'coffee' ? '咖啡订单' : typeKey === 'creative' ? '文创订单' : '混合订单' }}</td></tr></tbody></table>
+            <table><thead><tr><th>订单号</th><th>类型</th><th>用户ID</th><th>用户</th><th>商品数</th><th>金额</th><th>状态</th><th>支付</th><th>付款审核</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('orders').filter((order) => orderType(order) === typeKey)" :key="item.id"><td>#{{ item.id }}</td><td>{{ orderTypeLabel(item) }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.userName }}</td><td>{{ item.items?.length || 0 }}</td><td>{{ money(item.total) }}</td><td>{{ orderStatusLabel(item.status) }}</td><td>{{ paymentMethodLabel(item.paymentMethod) }}</td><td><span class="status">{{ reviewLabel(item.paymentReviewStatus) }}</span><div v-if="item.paymentReviewStatus === 'pending'" class="actions"><button class="btn" type="button" @click="reviewPayment(item, 'approved')">通过</button><button class="btn secondary" type="button" @click="reviewPayment(item, 'rejected')">驳回</button></div></td><td><button class="btn ghost" @click="openModal('编辑订单', `/api/admin/orders/${item.id}`, 'PATCH', orderFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/orders/${item.id}`)">删除</button></td></tr><tr v-if="!adminRows('orders').filter((order) => orderType(order) === typeKey).length"><td colspan="10">暂无{{ typeKey === 'coffee' ? '咖啡订单' : typeKey === 'creative' ? '文创订单' : '混合订单' }}</td></tr></tbody></table>
           </div>
         </section>
 

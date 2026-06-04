@@ -126,12 +126,26 @@ async function createTables() {
       status VARCHAR(30) NOT NULL,
       payment_method VARCHAR(40) NOT NULL DEFAULT '',
       paid_at DATETIME NULL,
+      cancelled_at DATETIME NULL,
       payment_review_status VARCHAR(20) NOT NULL DEFAULT 'not_submitted',
       payment_submitted_at DATETIME NULL,
       payment_reviewed_at DATETIME NULL,
       payment_reviewed_by INT NOT NULL DEFAULT 0,
       earned_points INT NOT NULL DEFAULT 0,
       earned_progress INT NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS payments (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      order_id INT NOT NULL,
+      user_id INT NOT NULL DEFAULT 0,
+      amount DECIMAL(10,2) NOT NULL,
+      method VARCHAR(20) NOT NULL DEFAULT 'mock',
+      status VARCHAR(20) NOT NULL DEFAULT 'unpaid',
+      transaction_no VARCHAR(80) NOT NULL DEFAULT '',
+      submitted_at DATETIME NULL,
+      confirmed_at DATETIME NULL,
+      expired_at DATETIME NULL,
       created_at DATETIME NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS order_items (
@@ -242,7 +256,8 @@ async function ensureOrderColumns() {
   const columns = [
     "ADD COLUMN payment_method VARCHAR(40) NOT NULL DEFAULT '' AFTER status",
     "ADD COLUMN paid_at DATETIME NULL AFTER payment_method",
-    "ADD COLUMN payment_review_status VARCHAR(20) NOT NULL DEFAULT 'not_submitted' AFTER paid_at",
+    "ADD COLUMN cancelled_at DATETIME NULL AFTER paid_at",
+    "ADD COLUMN payment_review_status VARCHAR(20) NOT NULL DEFAULT 'not_submitted' AFTER cancelled_at",
     "ADD COLUMN payment_submitted_at DATETIME NULL AFTER payment_review_status",
     "ADD COLUMN payment_reviewed_at DATETIME NULL AFTER payment_submitted_at",
     "ADD COLUMN payment_reviewed_by INT NOT NULL DEFAULT 0 AFTER payment_reviewed_at",
@@ -350,6 +365,9 @@ async function ensureIndexes() {
   const indexes = [
     { table: "orders", name: "idx_orders_user_id", columns: "user_id" },
     { table: "orders", name: "idx_orders_status", columns: "status" },
+    { table: "payments", name: "idx_payments_order_id", columns: "order_id" },
+    { table: "payments", name: "idx_payments_status", columns: "status" },
+    { table: "payments", name: "idx_payments_user_id", columns: "user_id" },
     { table: "reservations", name: "idx_reservations_user_id", columns: "user_id" },
     { table: "reservations", name: "idx_reservations_date", columns: "date" },
     { table: "reservations", name: "idx_reservations_date_time", columns: "date, time" },
@@ -444,6 +462,7 @@ async function loadTables() {
   const [books] = await pool.query("SELECT * FROM books ORDER BY id");
   const [reservations] = await pool.query("SELECT * FROM reservations ORDER BY id");
   const [orders] = await pool.query("SELECT * FROM orders ORDER BY id");
+  const [payments] = await pool.query("SELECT * FROM payments ORDER BY id");
   const [orderItems] = await pool.query("SELECT * FROM order_items ORDER BY id");
   const [activities] = await pool.query("SELECT * FROM activities ORDER BY id");
   const [activityApplications] = await pool.query("SELECT * FROM activity_applications ORDER BY id");
@@ -526,6 +545,7 @@ async function loadTables() {
     status: order.status,
     paymentMethod: order.payment_method || "",
     paidAt: formatDateTime(order.paid_at),
+    cancelledAt: formatDateTime(order.cancelled_at),
     paymentReviewStatus: order.payment_review_status || "not_submitted",
     paymentSubmittedAt: formatDateTime(order.payment_submitted_at),
     paymentReviewedAt: formatDateTime(order.payment_reviewed_at),
@@ -536,6 +556,19 @@ async function loadTables() {
     items: orderItems
       .filter((item) => item.order_id === order.id)
       .map((item) => ({ productId: item.product_id, name: item.name, price: Number(item.price), quantity: item.quantity }))
+  }));
+  db.payments = payments.map((payment) => ({
+    id: payment.id,
+    orderId: payment.order_id,
+    userId: payment.user_id,
+    amount: Number(payment.amount),
+    method: payment.method,
+    status: payment.status,
+    transactionNo: payment.transaction_no || "",
+    submittedAt: formatDateTime(payment.submitted_at),
+    confirmedAt: formatDateTime(payment.confirmed_at),
+    expiredAt: formatDateTime(payment.expired_at),
+    createdAt: formatDateTime(payment.created_at)
   }));
   db.activities = activities.map((item) => ({
     id: item.id,
@@ -723,9 +756,9 @@ async function persistBook(book) {
 async function persistOrder(order) {
   if (!pool) return;
   await pool.execute(
-    `INSERT INTO orders (id, user_id, user_name, total, status, payment_method, paid_at, payment_review_status, payment_submitted_at, payment_reviewed_at, payment_reviewed_by, earned_points, earned_progress, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), user_name=VALUES(user_name), total=VALUES(total), status=VALUES(status), payment_method=VALUES(payment_method), paid_at=VALUES(paid_at), payment_review_status=VALUES(payment_review_status), payment_submitted_at=VALUES(payment_submitted_at), payment_reviewed_at=VALUES(payment_reviewed_at), payment_reviewed_by=VALUES(payment_reviewed_by), earned_points=VALUES(earned_points), earned_progress=VALUES(earned_progress), created_at=VALUES(created_at)`,
+    `INSERT INTO orders (id, user_id, user_name, total, status, payment_method, paid_at, cancelled_at, payment_review_status, payment_submitted_at, payment_reviewed_at, payment_reviewed_by, earned_points, earned_progress, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), user_name=VALUES(user_name), total=VALUES(total), status=VALUES(status), payment_method=VALUES(payment_method), paid_at=VALUES(paid_at), cancelled_at=VALUES(cancelled_at), payment_review_status=VALUES(payment_review_status), payment_submitted_at=VALUES(payment_submitted_at), payment_reviewed_at=VALUES(payment_reviewed_at), payment_reviewed_by=VALUES(payment_reviewed_by), earned_points=VALUES(earned_points), earned_progress=VALUES(earned_progress), created_at=VALUES(created_at)`,
     [
       order.id,
       order.userId,
@@ -734,6 +767,7 @@ async function persistOrder(order) {
       order.status,
       order.paymentMethod || "",
       order.paidAt ? order.paidAt.slice(0, 19).replace("T", " ") : null,
+      order.cancelledAt ? order.cancelledAt.slice(0, 19).replace("T", " ") : null,
       order.paymentReviewStatus || "not_submitted",
       order.paymentSubmittedAt ? order.paymentSubmittedAt.slice(0, 19).replace("T", " ") : null,
       order.paymentReviewedAt ? order.paymentReviewedAt.slice(0, 19).replace("T", " ") : null,
@@ -750,6 +784,28 @@ async function persistOrder(order) {
       [order.id, item.productId, item.name, item.price, item.quantity]
     );
   }
+}
+
+async function persistPayment(payment) {
+  if (!pool) return;
+  await pool.execute(
+    `INSERT INTO payments (id, order_id, user_id, amount, method, status, transaction_no, submitted_at, confirmed_at, expired_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE order_id=VALUES(order_id), user_id=VALUES(user_id), amount=VALUES(amount), method=VALUES(method), status=VALUES(status), transaction_no=VALUES(transaction_no), submitted_at=VALUES(submitted_at), confirmed_at=VALUES(confirmed_at), expired_at=VALUES(expired_at), created_at=VALUES(created_at)`,
+    [
+      payment.id,
+      payment.orderId,
+      payment.userId || 0,
+      payment.amount,
+      payment.method || "mock",
+      payment.status || "unpaid",
+      payment.transactionNo || "",
+      payment.submittedAt ? payment.submittedAt.slice(0, 19).replace("T", " ") : null,
+      payment.confirmedAt ? payment.confirmedAt.slice(0, 19).replace("T", " ") : null,
+      payment.expiredAt ? payment.expiredAt.slice(0, 19).replace("T", " ") : null,
+      payment.createdAt ? payment.createdAt.slice(0, 19).replace("T", " ") : new Date().toISOString().slice(0, 19).replace("T", " ")
+    ]
+  );
 }
 
 async function persistActivity(activity) {
@@ -853,6 +909,7 @@ async function deleteBook(id) {
 async function deleteOrder(id) {
   if (!pool) return;
   await pool.execute("DELETE FROM order_items WHERE order_id=?", [id]);
+  await pool.execute("DELETE FROM payments WHERE order_id=?", [id]);
   await pool.execute("DELETE FROM orders WHERE id=?", [id]);
 }
 
@@ -894,6 +951,7 @@ module.exports = {
   persistAuditLog,
   persistComment,
   persistOrder,
+  persistPayment,
   persistPost,
   persistProduct,
   persistBook,

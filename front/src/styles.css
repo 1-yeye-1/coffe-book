@@ -1547,6 +1547,15 @@ td {
   object-fit: cover;
 }
 
+.payment-qr-shell {
+  width: 156px;
+  height: 156px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .fake-qr {
   background:
     linear-gradient(90deg, #111827 12px, transparent 12px) 0 0 / 24px 24px,

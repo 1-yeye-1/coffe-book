@@ -16,7 +16,7 @@ onMounted(async () => {
 });
 
 function pay() {
-  if (order.value) router.push(`/payment/${order.value.id}`);
+  if (order.value) router.push(`/pay/${order.value.id}`);
 }
 
 function cancel() {

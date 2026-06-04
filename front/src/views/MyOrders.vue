@@ -44,7 +44,7 @@ async function loadOrders() {
 }
 
 function pay(order) {
-  router.push(`/payment/${order.id}`);
+  router.push(`/pay/${order.id}`);
 }
 
 function view(order) {
