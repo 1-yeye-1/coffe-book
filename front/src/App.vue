@@ -117,5 +117,38 @@ function logout() {
     <main class="main page-transition">
       <RouterView />
     </main>
+
+    <footer class="site-footer">
+      <div class="site-footer-inner">
+        <section class="site-footer-brand">
+          <RouterLink class="brand brand-button" to="/brand">
+            <span class="brand-mark">咖</span>
+            <span>
+              <strong>咖啡书屋</strong>
+              <small>连接城市中的书房咖啡体验</small>
+            </span>
+          </RouterLink>
+        </section>
+        <section>
+          <h3>服务</h3>
+          <RouterLink to="/reservations">在线预约</RouterLink>
+          <RouterLink to="/activities">活动赛事</RouterLink>
+          <RouterLink to="/shop">文创商城</RouterLink>
+        </section>
+        <section>
+          <h3>资源</h3>
+          <RouterLink to="/culture">咖啡文化</RouterLink>
+          <RouterLink to="/books">精品书库</RouterLink>
+          <RouterLink to="/community">书友社区</RouterLink>
+        </section>
+        <section>
+          <h3>联系我们</h3>
+          <p>邮箱：hello@coffeehouse.com</p>
+          <p>电话：400-123-4567</p>
+          <p>地址：城市咖啡书屋体验空间</p>
+        </section>
+      </div>
+      <p class="site-footer-copy">© 2026 咖啡书屋. All rights reserved.</p>
+    </footer>
   </div>
 </template>
