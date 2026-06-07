@@ -4,12 +4,23 @@ const { createClient } = require("redis");
 const isProduction = process.env.NODE_ENV === "production";
 const redisUrl = process.env.REDIS_URL || "";
 
+const CAPTCHA_TTL_SECONDS = 180;
+const SMS_TTL_SECONDS = 300;
+const SMS_COOLDOWN_SECONDS = 60;
+const SLIDER_TTL_SECONDS = 180;
+const MAX_VERIFY_ATTEMPTS = 5;
+const MAX_VERIFY_FAILURES = 5;
+const SLIDER_TOLERANCE = 3;
+const SLIDER_MIN_ELAPSED_MS = 250;
+const SLIDER_MAX_ELAPSED_MS = SLIDER_TTL_SECONDS * 1000;
+const CLOCK_SKEW_MS = 5000;
+
 let redisClient = null;
 const memoryStore = new Map();
 
 async function initVerificationStore() {
   if (isProduction && !redisUrl) {
-    throw new Error("生产环境必须配置 REDIS_URL，用 Redis 存储验证码");
+    throw new Error("生产环境必须配置 REDIS_URL，用 Redis 存储验证码和滑块 challenge");
   }
 
   if (!redisUrl) return;
@@ -32,22 +43,58 @@ function randomDigits(length = 6) {
   return String(Math.floor(min + Math.random() * (max - min)));
 }
 
+function now() {
+  return Date.now();
+}
+
+function withMeta(payload, ttlSeconds, limits = {}) {
+  const issuedAt = now();
+  return {
+    ...payload,
+    issuedAt,
+    expiresAt: issuedAt + ttlSeconds * 1000,
+    attempts: 0,
+    failures: 0,
+    maxAttempts: limits.maxAttempts || MAX_VERIFY_ATTEMPTS,
+    maxFailures: limits.maxFailures || MAX_VERIFY_FAILURES
+  };
+}
+
+function ttlLeftSeconds(item) {
+  return Math.max(1, Math.ceil((Number(item?.expiresAt || 0) - now()) / 1000));
+}
+
+function cleanupMemoryStore() {
+  const current = now();
+  for (const [key, item] of memoryStore.entries()) {
+    if (item.expiresAt < current) memoryStore.delete(key);
+  }
+}
+
+// 存储抽象：开发环境用内存 Map，生产环境配置 REDIS_URL 后自动切换到 Redis。
+// 这样课程设计答辩时可以说明：接口逻辑不依赖具体存储，部署时只换环境变量。
 async function setValue(key, value, ttlSeconds) {
   if (redisClient) {
     await redisClient.set(key, JSON.stringify(value), { EX: ttlSeconds });
     return;
   }
-  memoryStore.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+  cleanupMemoryStore();
+  memoryStore.set(key, { value, expiresAt: now() + ttlSeconds * 1000 });
 }
 
 async function getValue(key) {
   if (redisClient) {
     const value = await redisClient.get(key);
-    return value ? JSON.parse(value) : null;
+    const parsed = value ? JSON.parse(value) : null;
+    if (parsed?.expiresAt && parsed.expiresAt < now()) {
+      await redisClient.del(key);
+      return null;
+    }
+    return parsed;
   }
   const item = memoryStore.get(key);
   if (!item) return null;
-  if (item.expiresAt < Date.now()) {
+  if (item.expiresAt < now()) {
     memoryStore.delete(key);
     return null;
   }
@@ -60,6 +107,23 @@ async function deleteValue(key) {
     return;
   }
   memoryStore.delete(key);
+}
+
+async function saveChallenge(key, item) {
+  await setValue(key, item, ttlLeftSeconds(item));
+}
+
+async function failChallenge(key, item) {
+  item.attempts = Number(item.attempts || 0) + 1;
+  item.failures = Number(item.failures || 0) + 1;
+  if (item.attempts >= Number(item.maxAttempts || MAX_VERIFY_ATTEMPTS)
+    || item.failures >= Number(item.maxFailures || MAX_VERIFY_FAILURES)
+    || Number(item.expiresAt || 0) <= now()) {
+    await deleteValue(key);
+    return false;
+  }
+  await saveChallenge(key, item);
+  return false;
 }
 
 function createCaptchaSvg(text) {
@@ -90,33 +154,65 @@ function createCaptchaSvg(text) {
 async function createCaptcha() {
   const token = randomToken();
   const answer = randomDigits(4);
-  await setValue(`captcha:${token}`, { answer }, 180);
-  return { token, image: createCaptchaSvg(answer), expiresIn: 180 };
+  await setValue(`captcha:${token}`, withMeta({ answer }, CAPTCHA_TTL_SECONDS), CAPTCHA_TTL_SECONDS);
+  return { token, image: createCaptchaSvg(answer), expiresIn: CAPTCHA_TTL_SECONDS };
 }
 
 async function createSliderChallenge() {
   const token = randomToken();
   const target = 58 + Math.floor(Math.random() * 30);
   const y = 20 + Math.floor(Math.random() * 36);
-  await setValue(`slider:${token}`, { target }, 180);
-  return { token, target, y, expiresIn: 180 };
+  const challenge = withMeta({ target, y }, SLIDER_TTL_SECONDS);
+  await setValue(`slider:${token}`, challenge, SLIDER_TTL_SECONDS);
+  return { token, target, y, issuedAt: challenge.issuedAt, expiresIn: SLIDER_TTL_SECONDS };
 }
 
 async function verifyCaptcha(token, answer) {
   if (!token || !answer) return false;
-  const item = await getValue(`captcha:${token}`);
+  const key = `captcha:${token}`;
+  const item = await getValue(key);
   if (!item) return false;
-  await deleteValue(`captcha:${token}`);
-  return String(item.answer).toLowerCase() === String(answer).trim().toLowerCase();
+  const matched = String(item.answer).toLowerCase() === String(answer).trim().toLowerCase();
+  if (!matched) return failChallenge(key, item);
+  await deleteValue(key);
+  return true;
 }
 
-async function verifySliderChallenge(token, value) {
+function parseSliderTimes(options = {}) {
+  const startedAt = Number(options.startedAt ?? options.sliderStartedAt ?? 0);
+  const endedAt = Number(options.endedAt ?? options.sliderEndedAt ?? 0);
+  return { startedAt, endedAt };
+}
+
+function sliderTimingLooksHuman(item, options) {
+  const current = now();
+  const { startedAt, endedAt } = parseSliderTimes(options);
+  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return false;
+  if (startedAt <= 0 || endedAt <= 0 || endedAt < startedAt) return false;
+  if (startedAt < Number(item.issuedAt || 0) - CLOCK_SKEW_MS) return false;
+  if (endedAt > current + CLOCK_SKEW_MS) return false;
+  const clientElapsed = endedAt - startedAt;
+  const serverElapsed = current - Number(item.issuedAt || current);
+  return clientElapsed >= SLIDER_MIN_ELAPSED_MS
+    && clientElapsed <= SLIDER_MAX_ELAPSED_MS
+    && serverElapsed >= SLIDER_MIN_ELAPSED_MS
+    && Number(item.expiresAt || 0) > current;
+}
+
+async function verifySliderChallenge(token, value, options = {}) {
   if (!token) return false;
-  const item = await getValue(`slider:${token}`);
+  const key = `slider:${token}`;
+  const item = await getValue(key);
   if (!item) return false;
-  await deleteValue(`slider:${token}`);
   const number = Number(value);
-  return Number.isFinite(number) && Math.abs(number - Number(item.target)) <= 3;
+  const valueMatched = Number.isFinite(number)
+    && number >= 0
+    && number <= 100
+    && Math.abs(number - Number(item.target)) <= SLIDER_TOLERANCE;
+  const timingMatched = sliderTimingLooksHuman(item, options);
+  if (!valueMatched || !timingMatched) return failChallenge(key, item);
+  await deleteValue(key);
+  return true;
 }
 
 async function createSmsCode(phone) {
@@ -125,34 +221,23 @@ async function createSmsCode(phone) {
     throw new Error("验证码发送过于频繁，请稍后再试");
   }
   const code = randomDigits(6);
-  await setValue(`sms:${phone}`, { code }, 300);
-  await setValue(cooldownKey, { active: true }, 60);
+  await setValue(`sms:${phone}`, withMeta({ code }, SMS_TTL_SECONDS), SMS_TTL_SECONDS);
+  await setValue(cooldownKey, { active: true, expiresAt: now() + SMS_COOLDOWN_SECONDS * 1000 }, SMS_COOLDOWN_SECONDS);
   if (!isProduction) {
     console.log(`[dev sms] ${phone}: ${code}`);
   }
-  return { expiresIn: 300 };
+  return { expiresIn: SMS_TTL_SECONDS, cooldown: SMS_COOLDOWN_SECONDS };
 }
 
 async function verifySmsCode(phone, code) {
   if (!phone || !code) return false;
-  const item = await getValue(`sms:${phone}`);
+  const key = `sms:${phone}`;
+  const item = await getValue(key);
   if (!item) return false;
   const matched = String(item.code) === String(code).trim();
-  if (matched) {
-    await deleteValue(`sms:${phone}`);
-    await deleteValue(`sms-fail:${phone}`);
-    return true;
-  }
-  const failureKey = `sms-fail:${phone}`;
-  const failure = await getValue(failureKey);
-  const count = Number(failure?.count || 0) + 1;
-  if (count >= 5) {
-    await deleteValue(`sms:${phone}`);
-    await deleteValue(failureKey);
-    return false;
-  }
-  await setValue(failureKey, { count }, 300);
-  return matched;
+  if (!matched) return failChallenge(key, item);
+  await deleteValue(key);
+  return true;
 }
 
 module.exports = {

@@ -167,7 +167,11 @@ test.describe.serial("coffee-book browser flows", () => {
     await page.getByTestId("checkout-contact").fill("E2E User");
     await page.getByTestId("checkout-phone").fill(DEMO_PHONE);
     await page.getByTestId("submit-order").click();
-    await expect(page).toHaveURL(/\/payment\//);
+    await expect(page).toHaveURL(/\/pay\//);
+    await expect(page.locator(".premium-payment")).toBeVisible();
+    await expect(page.locator(".payment-qr-image")).toBeVisible();
+    await page.locator(".checkout-main-btn").click();
+    await expect(page.locator(".payment-processing, .form-error").first()).toBeVisible();
   });
 
   test("reservation flow works", async ({ page }) => {

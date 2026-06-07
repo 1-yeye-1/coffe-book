@@ -1,13 +1,55 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { RouterLink } from "vue-router";
+import { gsap } from "gsap";
+import BookCard from "@/components/front/BookCard.vue";
 import DataState from "@/components/DataState.vue";
+import EventCard from "@/components/front/EventCard.vue";
+import ProductCard from "@/components/front/ProductCard.vue";
+import StatusBadge from "@/components/front/StatusBadge.vue";
 import { useSiteStore } from "@/stores/site";
 
 const siteStore = useSiteStore();
 const loading = ref(false);
 const error = ref("");
+const pageRoot = ref(null);
+const animatedStats = ref([]);
+let animationContext = null;
+let scrollHandler = null;
 
-onMounted(loadHome);
+const home = computed(() => siteStore.home);
+const heroImage = computed(() => home.value?.banners?.[0]?.image || "https://images.unsplash.com/photo-1521017432531-fbd92d768814?auto=format&fit=crop&w=1800&q=88");
+const stats = computed(() => home.value?.stats || []);
+const books = computed(() => (home.value?.books || []).slice(0, 4));
+const coffees = computed(() => (home.value?.coffees || []).slice(0, 3));
+const events = computed(() => {
+  const activityItems = (home.value?.recommendations || []).filter((item) => String(item.tag || "").includes("活动"));
+  return (activityItems.length ? activityItems : home.value?.recommendations || []).slice(0, 3);
+});
+const communityItems = computed(() => (home.value?.news || []).slice(0, 3));
+
+const reviews = [
+  { name: "城市读者", role: "黄金会员", text: "预约座位、买咖啡和参加夜读会都在一个系统里完成，展示时很有完整产品感。" },
+  { name: "北窗", role: "书友社区活跃用户", text: "社区动态和线下活动连接得很自然，像一个真的复合书店运营系统。" },
+  { name: "运营老师", role: "后台演示视角", text: "首页数据、商品、活动和会员入口都清楚，答辩时很好讲业务闭环。" }
+];
+
+const memberTiers = [
+  { title: "普通会员", desc: "积分、收藏、笔记与预约基础权益", value: "100+" },
+  { title: "黄金会员", desc: "活动优先报名与专属饮品兑换", value: "2x" },
+  { title: "钻石会员", desc: "主题活动席位与书屋礼品权益", value: "VIP" }
+];
+
+onMounted(async () => {
+  await loadHome();
+  await nextTick();
+  runAnimations();
+});
+
+onBeforeUnmount(() => {
+  if (animationContext) animationContext.revert();
+  if (scrollHandler) window.removeEventListener("scroll", scrollHandler);
+});
 
 async function loadHome() {
   loading.value = true;
@@ -20,67 +62,239 @@ async function loadHome() {
     loading.value = false;
   }
 }
+
+function statTarget(value) {
+  return Number(String(value || "0").replace(/[^\d.]/g, "")) || 0;
+}
+
+function formatStat(index, fallback) {
+  const value = animatedStats.value[index];
+  if (value === undefined) return fallback;
+  return Number(value).toLocaleString("zh-CN");
+}
+
+function animateStats() {
+  animatedStats.value = stats.value.map(() => 0);
+  stats.value.forEach((item, index) => {
+    const counter = { value: 0 };
+    gsap.to(counter, {
+      value: statTarget(item.value),
+      duration: 1.35,
+      delay: 0.15 + index * 0.08,
+      ease: "power2.out",
+      onUpdate: () => {
+        animatedStats.value[index] = Math.round(counter.value);
+      }
+    });
+  });
+}
+
+function runAnimations() {
+  if (!pageRoot.value) return;
+  if (animationContext) animationContext.revert();
+
+  animationContext = gsap.context(() => {
+    gsap.from(".home-hero-pro__copy > *", {
+      opacity: 0,
+      y: 22,
+      duration: 0.72,
+      stagger: 0.08,
+      ease: "power3.out"
+    });
+    gsap.from("[data-reveal]", {
+      opacity: 0,
+      y: 26,
+      duration: 0.7,
+      stagger: 0.06,
+      ease: "power3.out"
+    });
+  }, pageRoot.value);
+
+  animateStats();
+  scrollHandler = () => {
+    const offset = Math.min(92, window.scrollY * 0.08);
+    gsap.to(".home-hero-pro__media img", {
+      y: offset,
+      scale: 1.04,
+      duration: 0.35,
+      ease: "power2.out",
+      overwrite: true
+    });
+  };
+  window.addEventListener("scroll", scrollHandler, { passive: true });
+}
 </script>
 
 <template>
-  <section class="hero home-hero" data-testid="home-hero">
-    <div class="hero-content">
-      <span class="hero-eyebrow">Coffee · Books · Community</span>
-      <h1>咖啡书屋</h1>
-      <p>把精品咖啡、城市阅读、文创零售和社群活动放进一个高互动空间，让每一次到店都有新内容可探索。</p>
-      <div class="actions">
-        <RouterLink class="btn" to="/reservations">立即预约</RouterLink>
-        <RouterLink class="btn secondary" to="/shop">逛文创商城</RouterLink>
+  <div ref="pageRoot" class="home-page">
+    <section class="home-hero-pro" data-testid="home-hero">
+      <div class="home-hero-pro__media" aria-hidden="true">
+        <img :src="heroImage" alt="" />
       </div>
-      <div v-if="siteStore.home?.stats" class="hero-kpis">
-        <div v-for="item in siteStore.home.stats.slice(0, 3)" :key="item.label">
-          <strong>{{ item.value }}</strong>
-          <span>{{ item.label }}</span>
+      <div class="home-hero-pro__overlay"></div>
+      <div class="home-hero-pro__copy">
+        <span class="hero-eyebrow">Coffee · Books · Community</span>
+        <h1>咖啡书屋</h1>
+        <p>把精品咖啡、城市阅读、文创零售和社群活动放进一个高互动空间，让每一次到店都有新内容可探索。</p>
+        <div class="actions">
+          <RouterLink class="btn" to="/reservations">立即预约</RouterLink>
+          <RouterLink class="btn secondary" to="/shop">逛文创商城</RouterLink>
+        </div>
+
+        <div v-if="stats.length" class="home-hero-pro__stats">
+          <article v-for="(item, index) in stats.slice(0, 4)" :key="item.label">
+            <strong>{{ formatStat(index, item.value) }}</strong>
+            <span>{{ item.label }}</span>
+          </article>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <section class="section service-strip">
-    <article><strong>精品咖啡</strong><span>产区风味、手冲课程、招牌饮品</span></article>
-    <article><strong>城市阅读</strong><span>书库榜单、读书笔记、盲盒推荐</span></article>
-    <article><strong>在线预约</strong><span>座位状态、时间人数、特殊需求</span></article>
-    <article><strong>复合体验</strong><span>活动赛事、文创商城、会员积分</span></article>
-  </section>
+    <section class="home-channel-grid" data-reveal>
+      <article>
+        <span>01</span>
+        <strong>精品咖啡</strong>
+        <p>产区风味、手冲课程、季节限定饮品。</p>
+      </article>
+      <article>
+        <span>02</span>
+        <strong>城市阅读</strong>
+        <p>书库榜单、收藏笔记、热门书评。</p>
+      </article>
+      <article>
+        <span>03</span>
+        <strong>社群活动</strong>
+        <p>夜读会、公开课、挑战赛和报名管理。</p>
+      </article>
+    </section>
 
-  <DataState
-    :loading="loading"
-    :error="error"
-    :empty="!siteStore.home"
-    loading-title="首页内容加载中"
-    empty-title="暂无首页内容"
-    description="请确认后端 API 已启动。"
-    @retry="loadHome"
-  >
-    <section class="section">
-      <div class="section-head">
-        <div><h2>今日推荐</h2><p class="lead">咖啡、书籍和活动的运营位已接入后端接口。</p></div>
-      </div>
-      <div class="grid">
-        <article v-for="item in siteStore.home?.recommendations || []" :key="item.title" class="card media-card featured-card">
-          <img v-if="item.image" :src="item.image" :alt="item.title" />
-          <div class="body">
-            <span class="status">{{ item.tag }}</span>
-            <h3>{{ item.title }}</h3>
-            <p class="muted">{{ item.description }}</p>
+    <DataState
+      :loading="loading"
+      :error="error"
+      :empty="!home"
+      loading-title="首页内容加载中"
+      empty-title="暂无首页内容"
+      description="请确认后端 API 已启动。"
+      @retry="loadHome"
+    >
+      <section class="section home-section" data-reveal>
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Today Picks</span>
+            <h2>今日推荐</h2>
+            <p class="lead">咖啡、书籍和活动的运营位已接入后端接口。</p>
           </div>
-        </article>
-      </div>
-    </section>
+          <RouterLink class="link-button" to="/shop">查看全部</RouterLink>
+        </div>
+        <div class="home-feature-grid">
+          <ProductCard v-for="item in home?.recommendations || []" :key="item.title" :item="item" cta="探索详情" />
+        </div>
+      </section>
 
-    <section class="section">
-      <div class="section-head"><div><h2>最新动态</h2><p class="lead">公告、活动和社区内容统一进入信息流。</p></div></div>
-      <div class="feed">
-        <article v-for="item in siteStore.home?.news || []" :key="item.title" class="card timeline-card">
-          <div class="post-meta"><strong>{{ item.title }}</strong><span>{{ item.date }}</span></div>
-          <p>{{ item.summary }}</p>
-        </article>
-      </div>
-    </section>
-  </DataState>
+      <section class="section home-section" data-reveal>
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Books</span>
+            <h2>热门书籍</h2>
+            <p class="lead">馆藏内容来自精品书库接口，首屏以卡片方式呈现。</p>
+          </div>
+          <RouterLink class="link-button" to="/books">进入书库</RouterLink>
+        </div>
+        <div class="home-book-grid">
+          <BookCard v-for="book in books" :key="book.id" :book="book" />
+        </div>
+      </section>
+
+      <section class="section home-section" data-reveal>
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Coffee Bar</span>
+            <h2>热门咖啡</h2>
+            <p class="lead">用杂志式视觉强化咖啡书屋的主题识别。</p>
+          </div>
+          <RouterLink class="link-button" to="/culture">咖啡文化</RouterLink>
+        </div>
+        <div class="home-feature-grid">
+          <ProductCard v-for="item in coffees" :key="item.title" :item="item" cta="查看风味" />
+        </div>
+      </section>
+
+      <section class="home-split-section" data-reveal>
+        <div>
+          <span class="eyebrow">Events</span>
+          <h2>活动推荐</h2>
+          <p>读书会、咖啡公开课与城市书评挑战赛构成线下运营场景，前台报名与后台审核保持原业务链路。</p>
+          <RouterLink class="btn" to="/activities">查看活动</RouterLink>
+        </div>
+        <div class="home-event-stack">
+          <EventCard v-for="item in events" :key="item.title" :event="item" />
+        </div>
+      </section>
+
+      <section class="section home-section" data-reveal>
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Community</span>
+            <h2>社区推荐</h2>
+            <p class="lead">公告、活动和社区内容统一进入首页信息流。</p>
+          </div>
+          <RouterLink class="link-button" to="/community">进入社区</RouterLink>
+        </div>
+        <div class="home-news-grid">
+          <article v-for="item in communityItems" :key="item.title" class="home-news-card">
+            <StatusBadge label="书屋动态" type="accent" />
+            <h3>{{ item.title }}</h3>
+            <p>{{ item.summary }}</p>
+            <span>{{ item.date }}</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="home-story-panel" data-reveal>
+        <div>
+          <span class="eyebrow">Brand Story</span>
+          <h2>一间能被运营起来的城市书房</h2>
+          <p>咖啡书屋把到店消费、座位预约、活动报名、社区互动、积分兑换和后台运营管理放在同一套系统里，让毕业设计不只是页面展示，而是完整业务闭环。</p>
+        </div>
+        <div class="home-story-panel__facts">
+          <span>预约</span>
+          <span>订单</span>
+          <span>活动</span>
+          <span>社区</span>
+        </div>
+      </section>
+
+      <section class="section home-section" data-reveal>
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Members</span>
+            <h2>会员体系</h2>
+          </div>
+        </div>
+        <div class="home-member-grid">
+          <article v-for="tier in memberTiers" :key="tier.title">
+            <strong>{{ tier.value }}</strong>
+            <h3>{{ tier.title }}</h3>
+            <p>{{ tier.desc }}</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section home-section" data-reveal>
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Reviews</span>
+            <h2>用户评价</h2>
+          </div>
+        </div>
+        <div class="home-review-grid">
+          <article v-for="review in reviews" :key="review.name">
+            <p>{{ review.text }}</p>
+            <strong>{{ review.name }}</strong>
+            <span>{{ review.role }}</span>
+          </article>
+        </div>
+      </section>
+    </DataState>
+  </div>
 </template>

@@ -4,6 +4,7 @@ import App from "./App.vue";
 import router from "./router";
 import { redirectToLocalhost } from "./shared/canonical-host";
 import "./styles.css";
+import "./styles/design-system.css";
 
 redirectToLocalhost();
 

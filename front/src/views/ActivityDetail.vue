@@ -15,7 +15,7 @@ const activity = computed(() => siteStore.activities.find((item) => String(item.
 const remaining = computed(() => activity.value ? Math.max(0, activity.value.capacity - activity.value.applied) : 0);
 
 onMounted(() => {
-  if (!siteStore.activities.length) siteStore.fetchActivities();
+  siteStore.fetchActivity(route.params.activityId).catch((err) => { fieldError.value = err.message; });
   form.phone = userStore.user?.phone || "";
 });
 
@@ -26,6 +26,10 @@ function validPhone(phone) {
 async function submit(kind) {
   fieldError.value = "";
   message.value = "";
+  if (!activity.value || (activity.value.status && activity.value.status !== "open")) {
+    fieldError.value = "活动报名已关闭";
+    return;
+  }
   const people = Number(form.people);
   if (!Number.isInteger(people) || people < 1 || people > Math.max(1, remaining.value)) {
     fieldError.value = `报名人数必须是 1 到 ${Math.max(1, remaining.value)} 之间的整数`;
@@ -60,6 +64,7 @@ async function submit(kind) {
           <span><strong>提前报名开放</strong>{{ activity.earlyStart || "待公布" }}</span>
           <span><strong>直接报名开放</strong>{{ activity.registrationStart || "待公布" }}</span>
           <span><strong>剩余名额</strong>{{ remaining }} / {{ activity.capacity }}</span>
+          <span><strong>活动状态</strong>{{ activity.status === "closed" ? "已关闭" : "开放报名" }}</span>
         </div>
       </article>
       <form class="card" @submit.prevent>
@@ -70,8 +75,8 @@ async function submit(kind) {
         <label class="field"><span>报名人数</span><input v-model.number="form.people" type="number" min="1" :max="Math.max(1, remaining)" step="1" required /></label>
         <p v-if="fieldError" class="form-error">{{ fieldError }}</p>
         <div class="actions">
-          <button class="btn" type="button" :disabled="!remaining" @click="submit('regular')">{{ remaining ? "直接报名" : "名额已满" }}</button>
-          <button class="btn secondary" type="button" :disabled="!remaining" @click="submit('early')">提前报名</button>
+          <button class="btn" type="button" :disabled="!remaining || (activity.status && activity.status !== 'open')" @click="submit('regular')">{{ remaining ? "直接报名" : "名额已满" }}</button>
+          <button class="btn secondary" type="button" :disabled="!remaining || (activity.status && activity.status !== 'open')" @click="submit('early')">提前报名</button>
         </div>
       </form>
     </div>

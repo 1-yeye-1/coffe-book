@@ -54,8 +54,8 @@ const statusText = computed(() => {
 });
 
 onMounted(async () => {
-  const member = await userStore.fetchMember().catch(() => null);
-  orderStore.mergeRemoteOrders(member?.orders || []);
+  await userStore.fetchMember().catch(() => null);
+  await orderStore.fetchOrders().catch(() => null);
   await refreshPayment();
   if (!payment.value && order.value && !isPaid.value && !isCancelled.value) await createPayment();
   if (isReviewPending.value) startReviewPolling();

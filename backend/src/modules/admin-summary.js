@@ -1,4 +1,4 @@
-const { dashboardData, db, incomeData } = require("../shared/data");
+const { db, incomeData } = require("../shared/data");
 const { getDatabaseOverview, reloadDatabase } = require("../shared/mysql");
 
 const moduleTableMap = [
@@ -14,6 +14,101 @@ const moduleTableMap = [
   { module: "购物车记录", tables: ["carts"], fields: "user_key, product_id, quantity, created_at" },
   { module: "实时日志", tables: ["audit_logs"], fields: "actor_type, actor_id, actor_name, action, target_type, target_id, detail, created_at" }
 ];
+
+function toDateKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(String(value || "").replace(" ", "T"));
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function recentDateKeys(days = 7) {
+  return Array.from({ length: days }).map((_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (days - index - 1));
+    return toDateKey(date);
+  });
+}
+
+function isPaidOrder(order) {
+  return ["paid", "completed", "已支付", "已完成"].includes(String(order?.status || "")) || Boolean(order?.paidAt);
+}
+
+function orderStatusLabel(status) {
+  const labels = {
+    pending_payment: "待支付",
+    payment_review: "待确认收款",
+    paid: "已支付",
+    completed: "已完成",
+    cancelled: "已取消",
+    待支付: "待支付",
+    支付审核中: "待确认收款",
+    已支付: "已支付",
+    已完成: "已完成",
+    已取消: "已取消"
+  };
+  return labels[status] || status || "未知";
+}
+
+function enhancedDashboard() {
+  const today = toDateKey();
+  const paidOrders = db.orders.filter(isPaidOrder);
+  const todaysOrders = db.orders.filter((order) => toDateKey(order.createdAt) === today);
+  const todayIncome = paidOrders
+    .filter((order) => toDateKey(order.paidAt || order.paymentReviewedAt || order.createdAt) === today)
+    .reduce((sum, order) => sum + Number(order.total || 0), 0);
+
+  const salesTrend = recentDateKeys().map((date) => {
+    const dayOrders = paidOrders.filter((order) => toDateKey(order.paidAt || order.paymentReviewedAt || order.createdAt) === date);
+    return {
+      date,
+      label: date.slice(5),
+      total: Number(dayOrders.reduce((sum, order) => sum + Number(order.total || 0), 0).toFixed(2)),
+      count: dayOrders.length
+    };
+  });
+
+  const statusMap = new Map();
+  for (const order of db.orders) {
+    const label = orderStatusLabel(order.status);
+    statusMap.set(label, Number(statusMap.get(label) || 0) + 1);
+  }
+
+  const productMap = new Map();
+  for (const order of db.orders) {
+    for (const item of order.items || []) {
+      const current = productMap.get(item.productId) || { productId: item.productId, name: item.name, quantity: 0, total: 0 };
+      current.quantity += Number(item.quantity || 0);
+      current.total += Number(item.price || 0) * Number(item.quantity || 0);
+      productMap.set(item.productId, current);
+    }
+  }
+
+  const reservationMap = new Map();
+  for (const reservation of db.reservations) {
+    const key = reservation.time || "未设置";
+    reservationMap.set(key, Number(reservationMap.get(key) || 0) + 1);
+  }
+
+  return {
+    metrics: [
+      { label: "订单总数", value: db.orders.length, note: "orders 全量记录" },
+      { label: "今日订单", value: todaysOrders.length, note: today },
+      { label: "今日收入", value: `￥${todayIncome.toFixed(2)}`, note: "已支付订单" },
+      { label: "预约数量", value: db.reservations.length, note: "座位预约" },
+      { label: "用户数量", value: db.users.length, note: "会员账户" }
+    ],
+    salesTrend,
+    orderStatusDistribution: [...statusMap.entries()].map(([label, count]) => ({ label, count })),
+    hotProducts: [...productMap.values()]
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 6)
+      .map((item) => ({ ...item, total: Number(item.total.toFixed(2)) })),
+    reservationTimeStats: [...reservationMap.entries()]
+      .map(([time, count]) => ({ time, count }))
+      .sort((a, b) => String(a.time).localeCompare(String(b.time))),
+    refreshedAt: new Date().toISOString()
+  };
+}
 
 async function adminSummary() {
   await reloadDatabase();
@@ -60,7 +155,7 @@ async function adminSummary() {
       syncedAt: new Date().toISOString()
     },
     income: incomeData(),
-    dashboard: dashboardData()
+    dashboard: enhancedDashboard()
   };
 }
 

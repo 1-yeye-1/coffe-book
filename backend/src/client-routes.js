@@ -6,9 +6,10 @@ const { dashboardData, db, homeData, seatStatus, today } = require("./shared/dat
 const {
   persistActivity,
   persistActivityApplication,
-  persistCartItem,
+  persistUserCart,
   persistComment,
   persistOrder,
+  persistPayment,
   persistPost,
   persistProduct,
   persistReservation,
@@ -16,12 +17,12 @@ const {
 } = require("./shared/mysql");
 const { createCaptcha, createSliderChallenge, createSmsCode, verifyCaptcha, verifySliderChallenge, verifySmsCode } = require("./shared/verification-store");
 const { auditActivity } = require("./shared/audit");
-const { asTime, currentMonth, nextId, safeImage, validBirthday, validEmail, validInteger, validPhone, validStrongPassword } = require("./shared/validators");
-const { findActivityById, hasAppliedActivity } = require("./modules/activities");
-const { getUserCart, setUserCart } = require("./modules/cart");
+const { asTime, currentMonth, nextId, safeImage, validBirthday, validDateString, validEmail, validEnum, validInteger, validPhone, validStrongPassword, validTextLength, validTimeLabel } = require("./shared/validators");
+const { activityStatus, findActivityById, hasAppliedActivity } = require("./modules/activities");
+const { cartSnapshot, getUserCart, setUserCart } = require("./modules/cart");
 const { communityProfile, publicComment, publicPost } = require("./modules/community");
 const { earlySignupQuota, memberData, memberLevels, normalizeMember, pointRewards } = require("./modules/member");
-const { findOrderById, userOwnsOrder } = require("./modules/orders");
+const { findOrderById, listOrdersForUser, restoreOrderStock, userOwnsOrder } = require("./modules/orders");
 const {
   apiBaseFromRequest,
   cancelPayment,
@@ -33,7 +34,7 @@ const {
   submitPayment
 } = require("./modules/payments");
 const { findBookById, findProductById, listBooks, listProducts } = require("./modules/products");
-const { findReservationById, userOwnsReservation } = require("./modules/reservations");
+const { findReservationById, findSeatConflicts, userOwnsReservation } = require("./modules/reservations");
 const QRCode = require("qrcode");
 
 async function handleFrontApi(req, res, url) {
@@ -56,7 +57,12 @@ async function handleFrontApi(req, res, url) {
   if (method === "GET" && url.pathname === "/api/auth/captcha") return ok(res, await createCaptcha());
   if (method === "GET" && url.pathname === "/api/auth/slider") return ok(res, await createSliderChallenge());
   if (method === "GET" && url.pathname === "/api/home") return ok(res, homeData());
-  if (method === "GET" && url.pathname === "/api/products") return ok(res, listProducts());
+  if (method === "GET" && url.pathname === "/api/products") {
+    return ok(res, listProducts({
+      category: url.searchParams.get("category") || "",
+      q: url.searchParams.get("q") || url.searchParams.get("keyword") || ""
+    }));
+  }
   if (method === "GET" && url.pathname.startsWith("/api/products/")) {
     const product = findProductById(url.pathname.split("/").pop());
     return product ? ok(res, product) : fail(res, 404, "商品不存在");
@@ -67,9 +73,23 @@ async function handleFrontApi(req, res, url) {
     return book ? ok(res, book) : fail(res, 404, "书籍不存在");
   }
   if (method === "GET" && url.pathname === "/api/seats/status") return ok(res, seatStatus(url.searchParams.get("date") || today(), url.searchParams.get("time") || ""));
-  if (method === "GET" && url.pathname === "/api/activities") return ok(res, db.activities);
+  if (method === "GET" && url.pathname === "/api/reservations") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再查看预约");
+    return ok(res, db.reservations.filter((item) => item.userId === user.id));
+  }
+  if (method === "GET" && url.pathname.match(/^\/api\/reservations\/\d+$/)) {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再查看预约");
+    const reservation = findReservationById(url.pathname.split("/").pop());
+    if (!reservation) return fail(res, 404, "预约不存在");
+    if (!userOwnsReservation(reservation, user)) return fail(res, 403, "不能查看其他用户的预约");
+    return ok(res, reservation);
+  }
+  if (method === "GET" && url.pathname === "/api/activities") return ok(res, db.activities.filter((item) => activityStatus(item) !== "draft"));
   if (method === "GET" && url.pathname.match(/^\/api\/activities\/\d+$/)) {
     const activity = findActivityById(url.pathname.split("/").pop());
+    if (activity && activityStatus(activity) === "draft") return fail(res, 404, "活动不存在");
     return activity ? ok(res, activity) : fail(res, 404, "活动不存在");
   }
   if (method === "GET" && url.pathname === "/api/posts") {
@@ -89,6 +109,19 @@ async function handleFrontApi(req, res, url) {
   if (method === "GET" && url.pathname === "/api/member") {
     const user = currentUser(req);
     return user ? ok(res, memberData(user)) : fail(res, 401, "请先登录");
+  }
+  if (method === "GET" && url.pathname === "/api/orders") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再查看订单");
+    return ok(res, listOrdersForUser(user));
+  }
+  if (method === "GET" && url.pathname.match(/^\/api\/orders\/\d+$/)) {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再查看订单");
+    const order = findOrderById(url.pathname.split("/").pop());
+    if (!order) return fail(res, 404, "订单不存在");
+    if (!userOwnsOrder(order, user)) return fail(res, 403, "不能查看其他用户的订单");
+    return ok(res, order);
   }
   if (method === "GET" && url.pathname.match(/^\/api\/orders\/\d+\/payment-status$/)) {
     const user = currentUser(req);
@@ -114,11 +147,19 @@ async function handleFrontApi(req, res, url) {
     });
   }
 
+  if (method === "GET" && url.pathname === "/api/cart") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再查看购物车");
+    return ok(res, cartSnapshot(user.id));
+  }
+
   const body = await parseBody(req);
 
   if (method === "POST" && url.pathname === "/api/payments/create") {
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再创建支付");
+    if (!validInteger(body.orderId, 1)) return fail(res, 400, "订单编号不正确");
+    if (!validEnum(body.method || "mock", ["wechat", "alipay", "mock"])) return fail(res, 400, "支付方式不正确");
     const order = findOrderById(body.orderId);
     if (!order) return fail(res, 404, "订单不存在");
     if (!userOwnsOrder(order, user)) return fail(res, 403, "不能支付其他用户的订单");
@@ -133,6 +174,7 @@ async function handleFrontApi(req, res, url) {
   if (method === "POST" && url.pathname === "/api/payments/submit") {
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再提交支付");
+    if (!validInteger(body.paymentId || body.orderId, 1)) return fail(res, 400, "支付记录或订单编号不正确");
     const payment = body.paymentId ? findPaymentById(body.paymentId) : latestPaymentForOrder(body.orderId);
     if (!payment) return fail(res, 404, "支付记录不存在");
     const order = findOrderById(payment.orderId);
@@ -149,13 +191,19 @@ async function handleFrontApi(req, res, url) {
   if (method === "POST" && url.pathname === "/api/payments/cancel") {
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再取消支付");
+    if (!validInteger(body.paymentId || body.orderId, 1)) return fail(res, 400, "支付记录或订单编号不正确");
     const payment = body.paymentId ? findPaymentById(body.paymentId) : latestPaymentForOrder(body.orderId);
     if (!payment) return fail(res, 404, "支付记录不存在");
     const order = findOrderById(payment.orderId);
     if (!order) return fail(res, 404, "订单不存在");
     if (!userOwnsOrder(order, user)) return fail(res, 403, "不能取消其他用户的支付记录");
     try {
+      const wasCancelled = order.status === "cancelled";
       await cancelPayment(payment, order);
+      if (!wasCancelled) {
+        await restoreOrderStock(order);
+        await persistOrder(order);
+      }
       return ok(res, paymentPayload(payment, order, apiBaseFromRequest(req)), "订单已取消");
     } catch (error) {
       return fail(res, 409, error.message);
@@ -165,7 +213,10 @@ async function handleFrontApi(req, res, url) {
   if (method === "POST" && url.pathname === "/api/auth/sms-code") {
     if (!validPhone(body.phone)) return fail(res, 400, "请输入正确的手机号");
     const captchaPassed = await verifyCaptcha(body.captchaToken, body.captchaAnswer);
-    const sliderPassed = await verifySliderChallenge(body.sliderToken, body.sliderValue);
+    const sliderPassed = await verifySliderChallenge(body.sliderToken, body.sliderValue, {
+      sliderStartedAt: body.sliderStartedAt,
+      sliderEndedAt: body.sliderEndedAt
+    });
     if (!captchaPassed && !sliderPassed) return fail(res, 400, "请先完成验证码校验");
     try {
       const result = await createSmsCode(body.phone);
@@ -387,10 +438,47 @@ async function handleFrontApi(req, res, url) {
       .filter((item) => item.productId === product.id)
       .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
     if (currentQuantity + quantity > product.stock) return fail(res, 409, `购物车中的该商品数量必须是 1 到 ${product.stock} 之间的整数`);
-    cart.push({ productId: product.id, quantity });
+    const existed = cart.find((item) => item.productId === product.id);
+    if (existed) existed.quantity = currentQuantity + quantity;
+    else cart.push({ productId: product.id, quantity });
     setUserCart(key, cart);
-    await persistCartItem(key, product.id, quantity);
-    return ok(res, cart, "加入购物车成功");
+    await persistUserCart(key, cart);
+    return ok(res, cartSnapshot(key), "加入购物车成功");
+  }
+
+  if (method === "PATCH" && url.pathname.match(/^\/api\/cart\/\d+$/)) {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再修改购物车");
+    const productId = Number(url.pathname.split("/").pop());
+    const product = findProductById(productId);
+    if (!product) return fail(res, 404, "商品不存在");
+    const quantity = Number(body.quantity);
+    if (!validInteger(quantity, 1, product.stock)) return fail(res, 400, `商品数量必须是 1 到 ${product.stock} 之间的整数`);
+    const cart = getUserCart(user.id);
+    const item = cart.find((entry) => entry.productId === productId);
+    if (!item) return fail(res, 404, "购物车商品不存在");
+    item.quantity = quantity;
+    setUserCart(user.id, cart);
+    await persistUserCart(user.id, cart);
+    return ok(res, cartSnapshot(user.id), "购物车已更新");
+  }
+
+  if (method === "DELETE" && url.pathname.match(/^\/api\/cart\/\d+$/)) {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再删除购物车商品");
+    const productId = Number(url.pathname.split("/").pop());
+    const cart = getUserCart(user.id).filter((item) => item.productId !== productId);
+    setUserCart(user.id, cart);
+    await persistUserCart(user.id, cart);
+    return ok(res, cartSnapshot(user.id), "购物车商品已删除");
+  }
+
+  if (method === "DELETE" && url.pathname === "/api/cart") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再清空购物车");
+    setUserCart(user.id, []);
+    await persistUserCart(user.id, []);
+    return ok(res, [], "购物车已清空");
   }
 
   if (method === "POST" && url.pathname === "/api/orders") {
@@ -401,6 +489,7 @@ async function handleFrontApi(req, res, url) {
     if (items.length > 30) return fail(res, 400, "单次订单商品种类不能超过 30 个");
     const quantities = new Map();
     for (const item of items) {
+      if (!validInteger(item.productId, 1)) return fail(res, 400, "订单商品编号不正确");
       const product = findProductById(item.productId);
       if (!product) return fail(res, 404, "商品不存在");
       const quantity = Number(item.quantity || 1);
@@ -449,6 +538,28 @@ async function handleFrontApi(req, res, url) {
     return ok(res, order, "订单已创建，请完成支付");
   }
 
+  if (method === "POST" && url.pathname.match(/^\/api\/orders\/\d+\/cancel$/)) {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再取消订单");
+    const order = findOrderById(url.pathname.split("/")[3]);
+    if (!order) return fail(res, 404, "订单不存在");
+    if (!userOwnsOrder(order, user)) return fail(res, 403, "不能取消其他用户的订单");
+    if (["paid", "completed"].includes(String(order.status))) return fail(res, 409, "已支付订单不能由用户直接取消");
+    if (order.status !== "cancelled") {
+      order.status = "cancelled";
+      order.cancelledAt = new Date().toISOString();
+      order.paymentReviewStatus = order.paymentReviewStatus === "pending" ? "rejected" : order.paymentReviewStatus;
+      const payment = latestPaymentForOrder(order.id);
+      if (payment && payment.status !== "confirmed") {
+        payment.status = "failed";
+        await persistPayment(payment);
+      }
+      await restoreOrderStock(order);
+      await persistOrder(order);
+    }
+    return ok(res, order, "订单已取消");
+  }
+
   if (method === "POST" && url.pathname.match(/^\/api\/orders\/\d+\/pay$/)) {
     const id = Number(url.pathname.split("/")[3]);
     const order = findOrderById(id);
@@ -473,14 +584,21 @@ async function handleFrontApi(req, res, url) {
     const people = Number(body.people || 1);
     const phone = String(body.phone || "").trim();
     if (!validPhone(phone)) return fail(res, 400, "请填写正确的预留手机号");
+    if (!validDateString(date)) return fail(res, 400, "预约日期必须是今天或之后的有效日期");
+    if (!validTimeLabel(time)) return fail(res, 400, "预约时间格式不正确");
     if (!validInteger(people, 1, 20)) return fail(res, 400, "预约人数必须是 1 到 20 之间的整数");
+    if (!validTextLength(body.purpose || "阅读自习", 2, 60)) return fail(res, 400, "预约用途需为 2 到 60 个字符");
+    if (!validTextLength(body.note || "", 0, 120)) return fail(res, 400, "预约备注不能超过 120 个字符");
     const seatIds = Array.isArray(body.seatIds) ? [...new Set(body.seatIds.map(String))] : String(body.seatId || "").split(",").filter(Boolean);
+    if (!seatIds.length || seatIds.some((id) => !/^[A-C][1-6]$/.test(id))) return fail(res, 400, "座位编号不正确");
     if (seatIds.length < people) return fail(res, 400, `当前选择了 ${seatIds.length} 个座位，还需要选择 ${people - seatIds.length} 个座位`);
     if (seatIds.length > people) return fail(res, 400, `预约 ${people} 人只能选择 ${people} 个座位`);
     const available = seatStatus(date, time).filter((item) => item.status === "free").map((item) => item.id);
     if (available.length < people) return fail(res, 409, `该时段仅剩 ${available.length} 个空位，无法满足 ${people} 人预约`);
     const blocked = seatIds.filter((id) => !available.includes(id));
     if (blocked.length) return fail(res, 409, `座位 ${blocked.join("、")} 已被占用或预约，请重新选择`);
+    const conflicts = findSeatConflicts({ seatIds, date, time });
+    if (conflicts.length) return fail(res, 409, "所选座位已被预约，请刷新座位图后重试");
     const user = currentUser(req);
     const reservation = {
       id: nextId(db.reservations),
@@ -515,8 +633,10 @@ async function handleFrontApi(req, res, url) {
   if (method === "POST" && url.pathname.match(/^\/api\/activities\/\d+\/apply$/)) {
     const id = Number(url.pathname.split("/")[3]);
     const activity = findActivityById(id);
+    if (activity && activityStatus(activity) !== "open") return fail(res, 409, "活动报名已关闭");
     if (!activity) return fail(res, 404, "活动不存在");
     const user = currentUser(req);
+    if (body.kind && !validEnum(body.kind, ["regular", "early"])) return fail(res, 400, "报名类型不正确");
     const kind = body.kind === "early" ? "early" : "regular";
     const phone = String(user?.phone || body.phone || "").trim();
     const people = Number(body.people || 1);
@@ -546,8 +666,7 @@ async function handleFrontApi(req, res, url) {
   }
 
   if (method === "POST" && url.pathname === "/api/posts") {
-    if (!body.title || !body.content) return fail(res, 400, "标题和内容必填");
-    if (String(body.title).trim().length > 80 || String(body.content).trim().length > 2000) return fail(res, 400, "动态标题或内容过长");
+    if (!validTextLength(body.title, 2, 80) || !validTextLength(body.content, 2, 2000)) return fail(res, 400, "动态标题需为 2 到 80 个字符，内容需为 2 到 2000 个字符");
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再发布动态");
     let image;
@@ -580,8 +699,7 @@ async function handleFrontApi(req, res, url) {
     if (!post) return fail(res, 404, "动态不存在");
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再评论");
-    if (!String(body.content || "").trim()) return fail(res, 400, "评论内容不能为空");
-    if (String(body.content).trim().length > 500) return fail(res, 400, "评论不能超过 500 个字符");
+    if (!validTextLength(body.content, 1, 500)) return fail(res, 400, "评论内容需为 1 到 500 个字符");
     const allComments = db.posts.flatMap((item) => item.comments);
     const comment = { id: nextId(allComments), userId: user.id, user: user.name, avatar: user.avatar || "", content: String(body.content).trim(), likes: 0, likedBy: [], status: "pending" };
     post.comments.push(comment);

@@ -4,6 +4,7 @@ import { request } from "@/api";
 export const useProductStore = defineStore("product", {
   state: () => ({
     products: [],
+    currentProduct: null,
     loading: false
   }),
 
@@ -21,6 +22,16 @@ export const useProductStore = defineStore("product", {
         this.loading = false;
       }
       return this.products;
+    },
+
+    async fetchProduct(id) {
+      const cached = this.products.find((item) => String(item.id) === String(id));
+      if (cached) {
+        this.currentProduct = cached;
+        return cached;
+      }
+      this.currentProduct = await request(`/api/products/${id}`);
+      return this.currentProduct;
     }
   }
 });

@@ -10,6 +10,7 @@ export const useSiteStore = defineStore("site", {
     home: null,
     books: [],
     activities: [],
+    reservations: [],
     posts: [],
     seats: [],
     reservationDate: today(),
@@ -34,6 +35,14 @@ export const useSiteStore = defineStore("site", {
       return this.activities;
     },
 
+    async fetchActivity(id) {
+      const cached = this.activities.find((item) => String(item.id) === String(id));
+      if (cached) return cached;
+      const activity = await request(`/api/activities/${id}`);
+      this.activities = [...this.activities.filter((item) => String(item.id) !== String(id)), activity];
+      return activity;
+    },
+
     async fetchPosts() {
       this.posts = await request("/api/posts");
       return this.posts;
@@ -44,6 +53,11 @@ export const useSiteStore = defineStore("site", {
       this.reservationTime = time;
       this.seats = await request(`/api/seats/status?date=${encodeURIComponent(date)}&time=${encodeURIComponent(time)}`);
       return this.seats;
+    },
+
+    async fetchReservations() {
+      this.reservations = await request("/api/reservations");
+      return this.reservations;
     },
 
     toggleSeat(seatId, maxCount) {
@@ -63,6 +77,13 @@ export const useSiteStore = defineStore("site", {
       });
       this.selectedSeats = [];
       await this.fetchSeats();
+    },
+
+    async cancelReservation(id) {
+      const reservation = await request(`/api/reservations/${id}`, { method: "DELETE" });
+      this.reservations = this.reservations.map((item) => item.id === reservation.id ? reservation : item);
+      await this.fetchSeats();
+      return reservation;
     },
 
     async applyActivity(activityId, payload) {

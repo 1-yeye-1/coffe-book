@@ -44,6 +44,8 @@ function apiIndex() {
   };
 }
 
+const useMemoryDb = process.env.COFFEE_BOOK_MEMORY_DB === "1";
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -62,8 +64,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-Promise.all([initDatabase(), initVerificationStore()])
+Promise.all([useMemoryDb ? Promise.resolve() : initDatabase(), initVerificationStore()])
   .then(() => {
+    if (useMemoryDb) console.log("Coffee Book API using in-memory demo data (COFFEE_BOOK_MEMORY_DB=1)");
     server.listen(PORT, () => {
       console.log(`Coffee Book API running at http://localhost:${PORT}`);
     });

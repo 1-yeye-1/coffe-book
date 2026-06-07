@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, watch } from "vue";
-import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+import { RouterView, useRoute, useRouter } from "vue-router";
+import AppFooter from "@/components/front/AppFooter.vue";
+import AppHeader from "@/components/front/AppHeader.vue";
 import { useCartStore } from "@/stores/cart";
 import { useProductStore } from "@/stores/product";
 import { useSiteStore } from "@/stores/site";
@@ -15,6 +17,7 @@ const userStore = useUserStore();
 let refreshTimer = null;
 
 const cartCount = computed(() => cartStore.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
+const messageCount = computed(() => userStore.member?.notifications?.length || 0);
 const accountLinks = computed(() => [
   { to: "/cart", label: "购物车", badge: cartCount.value || "" },
   { to: "/orders", label: "我的订单" },
@@ -65,90 +68,19 @@ function logout() {
 
 <template>
   <div class="app-shell vue-shell">
-    <header class="topbar">
-      <RouterLink class="brand brand-button" to="/brand">
-        <span class="brand-mark">咖</span>
-        <span>
-          <strong>咖啡书屋</strong>
-          <small>点击查看品牌介绍</small>
-        </span>
-      </RouterLink>
-
-      <nav class="nav">
-        <RouterLink to="/">首页</RouterLink>
-        <RouterLink to="/culture">咖啡文化</RouterLink>
-        <RouterLink to="/books">精品书库</RouterLink>
-        <RouterLink to="/shop">文创商城</RouterLink>
-        <RouterLink to="/reservations">在线预约</RouterLink>
-        <RouterLink to="/community">书友社区</RouterLink>
-        <RouterLink to="/activities">活动赛事</RouterLink>
-      </nav>
-
-      <div class="auth-actions">
-        <template v-if="userStore.isLoggedIn">
-          <div class="account-menu">
-            <button class="account-trigger" type="button">
-              <span class="avatar">
-                <img v-if="userStore.user?.avatar" :src="userStore.user.avatar" :alt="userStore.user.name" />
-                <span v-else>{{ userStore.user?.name?.slice(0, 1) || "会" }}</span>
-              </span>
-              <span class="account-trigger-text">
-                <strong>{{ userStore.user?.name || "个人中心" }}</strong>
-                <small>{{ userStore.user?.level || "普通会员" }}</small>
-              </span>
-              <span class="chevron">⌄</span>
-            </button>
-            <div class="account-dropdown">
-              <RouterLink v-for="item in accountLinks" :key="item.to" :to="item.to">
-                <span>{{ item.label }}</span>
-                <span v-if="item.badge" class="menu-badge">{{ item.badge }}</span>
-              </RouterLink>
-              <button type="button" @click="logout"><span>退出登录</span></button>
-            </div>
-          </div>
-        </template>
-        <template v-else>
-          <RouterLink class="btn ghost" to="/register">注册</RouterLink>
-          <RouterLink class="btn" to="/login">登录</RouterLink>
-        </template>
-      </div>
-    </header>
+    <AppHeader
+      :is-logged-in="userStore.isLoggedIn"
+      :user="userStore.user"
+      :account-links="accountLinks"
+      :cart-count="cartCount"
+      :message-count="messageCount"
+      @logout="logout"
+    />
 
     <main class="main page-transition">
       <RouterView />
     </main>
 
-    <footer class="site-footer">
-      <div class="site-footer-inner">
-        <section class="site-footer-brand">
-          <RouterLink class="brand brand-button" to="/brand">
-            <span class="brand-mark">咖</span>
-            <span>
-              <strong>咖啡书屋</strong>
-              <small>连接城市中的书房咖啡体验</small>
-            </span>
-          </RouterLink>
-        </section>
-        <section>
-          <h3>服务</h3>
-          <RouterLink to="/reservations">在线预约</RouterLink>
-          <RouterLink to="/activities">活动赛事</RouterLink>
-          <RouterLink to="/shop">文创商城</RouterLink>
-        </section>
-        <section>
-          <h3>资源</h3>
-          <RouterLink to="/culture">咖啡文化</RouterLink>
-          <RouterLink to="/books">精品书库</RouterLink>
-          <RouterLink to="/community">书友社区</RouterLink>
-        </section>
-        <section>
-          <h3>联系我们</h3>
-          <p>邮箱：hello@coffeehouse.com</p>
-          <p>电话：400-123-4567</p>
-          <p>地址：城市咖啡书屋体验空间</p>
-        </section>
-      </div>
-      <p class="site-footer-copy">© 2026 咖啡书屋. All rights reserved.</p>
-    </footer>
+    <AppFooter />
   </div>
 </template>

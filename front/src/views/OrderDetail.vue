@@ -11,16 +11,16 @@ const userStore = useUserStore();
 const order = computed(() => orderStore.getOrderById(route.params.orderId));
 
 onMounted(async () => {
-  const member = await userStore.fetchMember().catch(() => null);
-  orderStore.mergeRemoteOrders(member?.orders || []);
+  await userStore.fetchMember().catch(() => null);
+  await orderStore.fetchOrder(route.params.orderId).catch(() => orderStore.fetchOrders().catch(() => null));
 });
 
 function pay() {
   if (order.value) router.push(`/pay/${order.value.id}`);
 }
 
-function cancel() {
-  if (order.value) orderStore.cancelOrder(order.value.id);
+async function cancel() {
+  if (order.value) await orderStore.cancelOrder(order.value.id).catch(() => null);
 }
 
 function finish() {

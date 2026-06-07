@@ -544,6 +544,43 @@ td {
   font-weight: 880;
 }
 
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.dashboard-panel {
+  min-width: 0;
+}
+
+.mini-bars {
+  display: grid;
+  gap: 12px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr) 92px;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.92rem;
+}
+
+.bar-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.08);
+}
+
+.bar-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #0f766e);
+}
+
 .hero-kpis span,
 .muted,
 .gift-meta,
@@ -2052,6 +2089,7 @@ td {
   .profile-page-grid,
   .profile-full-layout,
   .reservation-workbench,
+  .dashboard-grid,
   .auth-panel {
     grid-template-columns: 1fr;
   }

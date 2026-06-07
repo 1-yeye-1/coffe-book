@@ -1,12 +1,18 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { request } from "@/api";
+import DataState from "@/components/DataState.vue";
+import BaseToast from "@/components/front/BaseToast.vue";
+import StatusBadge from "@/components/front/StatusBadge.vue";
 import { useUserStore } from "@/stores/user";
 
 const userStore = useUserStore();
 const member = computed(() => userStore.member);
-const message = ref("");
+const loading = ref(false);
 const error = ref("");
+const saving = ref(false);
+const toastMessage = ref("");
+const toastType = ref("success");
 
 const form = reactive({
   name: "",
@@ -21,18 +27,48 @@ const form = reactive({
 });
 
 const stats = computed(() => member.value?.stats || { favoriteBooks: 0, publishedComments: 0, orderCount: 0 });
+const membership = computed(() => member.value?.membership || {});
+const progressPercent = computed(() => {
+  const target = Number(membership.value.target || 1);
+  const current = Number(membership.value.current || 0);
+  return Math.min(100, Math.round((current / target) * 100));
+});
 const dataCards = computed(() => [
-  { label: "收藏书籍", value: stats.value.favoriteBooks, to: "/favorites" },
-  { label: "发布评论", value: stats.value.publishedComments, to: "/community" },
-  { label: "订单数量", value: stats.value.orderCount, to: "/orders" }
+  { label: "收藏内容", value: stats.value.favoriteBooks, to: "/favorites", type: "accent" },
+  { label: "社区互动", value: stats.value.publishedComments, to: "/community", type: "success" },
+  { label: "订单数量", value: stats.value.orderCount, to: "/orders", type: "warning" },
+  { label: "礼品数量", value: member.value?.gifts?.length || 0, to: "/gifts", type: "default" }
+]);
+const interestTags = computed(() => {
+  const tags = [
+    ...splitTags(form.coffeePreference),
+    ...splitTags(form.bookPreference),
+    ...(member.value?.favorites || []).slice(0, 3).map((item) => String(item).slice(0, 8))
+  ];
+  return Array.from(new Set(tags.filter(Boolean))).slice(0, 10);
+});
+const badgeCards = computed(() => [
+  { title: membership.value.level || member.value?.level || "普通会员", desc: "当前会员等级", type: "accent" },
+  { title: `${member.value?.points || 0} 积分`, desc: "可用于礼品兑换", type: "success" },
+  { title: membership.value.checkedInToday ? "今日已签到" : "今日待签到", desc: "每日签到提升成长值", type: membership.value.checkedInToday ? "success" : "warning" }
 ]);
 
-onMounted(async () => {
-  await userStore.fetchMember();
-  fillForm(member.value);
-});
+onMounted(loadProfile);
 
 watch(member, fillForm);
+
+async function loadProfile() {
+  loading.value = true;
+  error.value = "";
+  try {
+    await userStore.fetchMember();
+    fillForm(member.value);
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+    loading.value = false;
+  }
+}
 
 function fillForm(value) {
   if (!value) return;
@@ -49,8 +85,23 @@ function fillForm(value) {
   });
 }
 
+function splitTags(value) {
+  return String(value || "").split(/[、,，\s]+/).map((item) => item.trim()).filter(Boolean);
+}
+
 function avatarText(name) {
   return name?.slice(0, 1) || "会";
+}
+
+function showToast(message, type = "success") {
+  toastMessage.value = "";
+  toastType.value = type;
+  window.setTimeout(() => {
+    toastMessage.value = message;
+    window.setTimeout(() => {
+      if (toastMessage.value === message) toastMessage.value = "";
+    }, 2200);
+  });
 }
 
 function validPhone(phone) {
@@ -76,11 +127,11 @@ function handleAvatar(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   if (!file.type.startsWith("image/")) {
-    error.value = "只能上传图片文件";
+    showToast("只能上传图片文件", "danger");
     return;
   }
   if (file.size > 1.5 * 1024 * 1024) {
-    error.value = "头像图片不能超过 1.5MB";
+    showToast("头像图片不能超过 1.5MB", "danger");
     return;
   }
   const reader = new FileReader();
@@ -90,12 +141,12 @@ function handleAvatar(event) {
 
 async function save() {
   error.value = "";
-  message.value = "";
   const validation = validateProfile();
   if (validation) {
-    error.value = validation;
+    showToast(validation, "danger");
     return;
   }
+  saving.value = true;
   try {
     const data = await request("/api/member/profile", {
       method: "PATCH",
@@ -104,80 +155,122 @@ async function save() {
     userStore.user = data;
     localStorage.setItem("coffee_user", JSON.stringify(data));
     await userStore.fetchMember();
-    message.value = "个人资料已保存";
+    showToast("个人资料已保存");
   } catch (err) {
-    error.value = err.message;
+    showToast(err.message, "danger");
+  } finally {
+    saving.value = false;
   }
 }
 </script>
 
 <template>
-  <section class="section">
-    <div class="section-head">
-      <div>
-        <h2>个人资料</h2>
-        <p class="lead">基础资料、我的数据和偏好设置均与 MySQL 会员数据对应。</p>
-      </div>
-    </div>
+  <section class="section profile-pro-page">
+    <BaseToast :visible="Boolean(toastMessage)" :message="toastMessage" :type="toastType" />
 
-    <form class="profile-page-grid" @submit.prevent="save">
-      <article class="card profile-card profile-basic-card">
-        <div class="profile-avatar-row">
-          <div class="profile-avatar">
+    <DataState
+      :loading="loading"
+      :error="error"
+      :empty="!member"
+      loading-title="个人资料同步中"
+      empty-title="暂未获取资料"
+      description="登录后即可编辑基础资料、阅读偏好与咖啡偏好。"
+      @retry="loadProfile"
+    >
+      <div class="profile-hero-pro">
+        <div class="profile-identity">
+          <div class="profile-avatar-xl">
             <img v-if="form.avatar" :src="form.avatar" alt="头像预览" />
             <span v-else>{{ avatarText(form.name) }}</span>
           </div>
           <div>
-            <h3>基础资料</h3>
-            <p class="muted">头像、用户名、邮箱、手机号和个人简介会保存到会员表。</p>
-            <label class="btn ghost upload-button">上传头像<input type="file" accept="image/*" @change="handleAvatar" /></label>
+            <p class="eyebrow">Profile</p>
+            <h2>{{ form.name || "咖啡书屋会员" }}</h2>
+            <p class="lead">{{ form.bio || "完善资料后，书屋会更懂你的阅读和咖啡偏好。" }}</p>
+            <div class="hero-chip-row">
+              <StatusBadge :label="member.level || '普通会员'" type="accent" />
+              <StatusBadge :label="`${member.points || 0} 积分`" type="success" />
+              <StatusBadge :label="member.showProfile === false ? '主页私密' : '主页公开'" type="warning" />
+            </div>
           </div>
         </div>
+        <label class="btn ghost upload-button">更换头像<input type="file" accept="image/*" @change="handleAvatar" /></label>
+      </div>
 
-        <div class="profile-account-meta">
-          <span>会员编号 #{{ member?.id || "-" }}</span>
-          <span>{{ member?.level || "普通会员" }}</span>
-          <span>{{ member?.points || 0 }} 积分</span>
-        </div>
+      <div class="profile-pro-layout">
+        <aside class="profile-side-stack">
+          <article class="card member-level-card">
+            <div class="level-progress-head">
+              <div>
+                <p class="eyebrow">Member Growth</p>
+                <h3>{{ membership.level || member.level }}</h3>
+              </div>
+              <strong>{{ progressPercent }}%</strong>
+            </div>
+            <div class="mini-progress"><span :style="{ width: `${progressPercent}%` }"></span></div>
+            <p class="muted">距离 {{ membership.nextLevel || "下一等级" }} 还需 {{ membership.need || 0 }} 成长值。</p>
+          </article>
 
-        <div class="profile-fields-grid">
-          <label class="field"><span>用户名</span><input v-model.trim="form.name" maxlength="30" /></label>
-          <label class="field"><span>邮箱</span><input v-model.trim="form.email" type="email" maxlength="160" placeholder="用于绑定邮箱" /></label>
-          <label class="field"><span>手机号</span><input v-model.trim="form.phone" inputmode="numeric" maxlength="11" placeholder="用于绑定手机号" /></label>
-          <label class="field"><span>生日</span><input v-model="form.birthday" type="date" /></label>
-        </div>
-        <label class="field"><span>个人简介</span><textarea v-model.trim="form.bio" rows="4" maxlength="200" placeholder="介绍你的阅读和咖啡偏好"></textarea></label>
-      </article>
+          <article class="card badge-wall-card">
+            <h3>我的勋章</h3>
+            <div class="badge-card-list">
+              <div v-for="badge in badgeCards" :key="badge.title" class="badge-card-mini">
+                <StatusBadge :label="badge.title" :type="badge.type" />
+                <span>{{ badge.desc }}</span>
+              </div>
+            </div>
+          </article>
 
-      <aside class="card profile-card profile-data-panel">
-        <div>
-          <h3>我的数据</h3>
-          <p class="muted">点击数据可以查看对应详情。</p>
-        </div>
-        <div class="profile-data-grid">
-          <RouterLink v-for="item in dataCards" :key="item.label" class="profile-data-card" :to="item.to">
-            <span>{{ item.label }}</span>
-            <strong>{{ item.value }}</strong>
-          </RouterLink>
-        </div>
-        <div class="profile-inline-list">
-          <p><span>会员等级</span><strong>{{ member?.level || "-" }}</strong></p>
-          <p><span>可用积分</span><strong>{{ member?.points || 0 }}</strong></p>
-        </div>
-      </aside>
+          <article class="card profile-interest-card">
+            <h3>兴趣标签</h3>
+            <div class="tag-cloud">
+              <button v-for="tag in interestTags" :key="tag" type="button">{{ tag }}</button>
+              <span v-if="!interestTags.length" class="muted">填写偏好后自动生成标签</span>
+            </div>
+          </article>
+        </aside>
 
-      <article class="card profile-card profile-preferences-card">
-        <h3>偏好设置</h3>
-        <p class="muted">完善偏好和配送信息后，活动推荐与文创订单会更贴合你的使用习惯。</p>
-        <div class="profile-fields-grid">
-          <label class="field"><span>喜欢的咖啡类型</span><input v-model.trim="form.coffeePreference" maxlength="60" placeholder="例如：手冲、拿铁、冷萃" /></label>
-          <label class="field"><span>喜欢的书籍分类</span><input v-model.trim="form.bookPreference" maxlength="60" placeholder="例如：文学、商业、艺术" /></label>
-        </div>
-        <label class="field"><span>收货地址</span><textarea v-model.trim="form.address" rows="3" maxlength="160" placeholder="用于文创商品配送"></textarea></label>
-        <p v-if="message" class="form-notice">{{ message }}</p>
-        <p v-if="error" class="form-error">{{ error }}</p>
-        <button class="btn" type="submit">保存资料</button>
-      </article>
-    </form>
+        <main class="profile-main-stack">
+          <div class="member-stat-grid">
+            <RouterLink v-for="item in dataCards" :key="item.label" class="card member-stat-card link-card" :to="item.to">
+              <StatusBadge :label="item.label" :type="item.type" />
+              <strong>{{ item.value }}</strong>
+            </RouterLink>
+          </div>
+
+          <form class="card profile-edit-card" @submit.prevent="save">
+            <div class="section-head compact">
+              <div>
+                <p class="eyebrow">Basic Info</p>
+                <h3>基础资料</h3>
+              </div>
+              <button class="btn" type="submit" :disabled="saving">{{ saving ? "保存中..." : "保存资料" }}</button>
+            </div>
+            <div class="profile-fields-grid">
+              <label class="field"><span>昵称</span><input v-model.trim="form.name" maxlength="30" /></label>
+              <label class="field"><span>手机号</span><input v-model.trim="form.phone" inputmode="numeric" maxlength="11" /></label>
+              <label class="field"><span>邮箱</span><input v-model.trim="form.email" type="email" maxlength="160" /></label>
+              <label class="field"><span>生日</span><input v-model="form.birthday" type="date" /></label>
+            </div>
+            <label class="field"><span>个人简介</span><textarea v-model.trim="form.bio" rows="4" maxlength="200" placeholder="介绍你的阅读和咖啡偏好"></textarea></label>
+          </form>
+
+          <article class="card profile-edit-card">
+            <div class="section-head compact">
+              <div>
+                <p class="eyebrow">Preferences</p>
+                <h3>偏好设置</h3>
+              </div>
+            </div>
+            <div class="preference-card-grid">
+              <label class="field"><span>咖啡偏好</span><input v-model.trim="form.coffeePreference" maxlength="60" placeholder="例如：手冲、拿铁、冷萃" /></label>
+              <label class="field"><span>阅读偏好</span><input v-model.trim="form.bookPreference" maxlength="60" placeholder="例如：文学、商业、艺术" /></label>
+            </div>
+            <label class="field"><span>常用收货地址</span><textarea v-model.trim="form.address" rows="3" maxlength="160" placeholder="用于文创商品配送"></textarea></label>
+            <button class="btn ghost" type="button" :disabled="saving" @click="save">{{ saving ? "保存中..." : "保存偏好" }}</button>
+          </article>
+        </main>
+      </div>
+    </DataState>
   </section>
 </template>

@@ -45,8 +45,9 @@ async function apiRequest(path, options = {}, scope = "user") {
   }
 
   const body = await response.json().catch(() => null);
-  if (!response.ok || !body?.success) {
-    throw new ApiError(body?.message || "请求失败", response.status, body);
+  const ok = body?.success === true || body?.code === 200;
+  if (!response.ok || !ok) {
+    throw new ApiError(body?.msg || body?.message || "请求失败", response.status, body);
   }
   return body.data;
 }

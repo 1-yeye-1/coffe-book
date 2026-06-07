@@ -11,6 +11,7 @@ const env = {
   PORT: "4173",
   FRONT_PORT: "5173",
   NODE_ENV: "development",
+  COFFEE_BOOK_MEMORY_DB: process.env.COFFEE_BOOK_MEMORY_DB || "1",
   VITE_API_BASE: "http://127.0.0.1:4173",
   JWT_SECRET: process.env.JWT_SECRET || "coffee-book-e2e-secret-at-least-32-characters"
 };

@@ -50,6 +50,28 @@ function validPeople(value) {
   return validInteger(value, 1, 20);
 }
 
+function validTextLength(value, min = 0, max = 200) {
+  const length = String(value || "").trim().length;
+  return length >= min && length <= max;
+}
+
+function validDateString(value, { allowPast = false } = {}) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const [year, month, day] = text.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const valid = date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+  return valid && (allowPast || text >= today());
+}
+
+function validTimeLabel(value) {
+  return /^([01]\d|2[0-3]):[0-5]\d(?:-([01]\d|2[0-3]):[0-5]\d)?$/.test(String(value || "").trim());
+}
+
+function validEnum(value, allowed) {
+  return allowed.includes(String(value || ""));
+}
+
 function asTime(value) {
   return new Date(String(value || "").replace(" ", "T")).getTime();
 }
@@ -72,11 +94,15 @@ module.exports = {
   nextId,
   safeImage,
   validBirthday,
+  validDateString,
   validEmail,
+  validEnum,
   validInteger,
   validNonNegativeInteger,
   validNonNegativeNumber,
   validPeople,
   validPhone,
-  validStrongPassword
+  validStrongPassword,
+  validTextLength,
+  validTimeLabel
 };

@@ -1,4 +1,6 @@
 <script setup>
+import BaseButton from "@/components/BaseButton.vue";
+
 defineProps({
   loading: { type: Boolean, default: false },
   error: { type: String, default: "" },
@@ -26,7 +28,7 @@ defineEmits(["retry"]);
     <div>
       <strong>{{ errorTitle }}</strong>
       <p>{{ error }}</p>
-      <button class="btn ghost" type="button" @click="$emit('retry')">重试</button>
+      <BaseButton variant="ghost" @click="$emit('retry')">重试</BaseButton>
     </div>
   </div>
 

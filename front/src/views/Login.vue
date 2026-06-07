@@ -20,6 +20,8 @@ const sliderTarget = ref(72);
 const sliderY = ref(36);
 const sliderVerified = ref(false);
 const sliderDragging = ref(false);
+const sliderStartedAt = ref(0);
+const sliderEndedAt = ref(0);
 let cooldownTimer = null;
 
 const form = reactive({
@@ -126,6 +128,8 @@ function resetSlider(needsChallenge = true) {
   sliderValue.value = 0;
   sliderVerified.value = false;
   sliderDragging.value = false;
+  sliderStartedAt.value = 0;
+  sliderEndedAt.value = 0;
   fieldErrors.slider = "";
   if (needsChallenge) loadSlider().catch(() => {
     fieldErrors.slider = "滑块验证加载失败，请稍后重试";
@@ -148,6 +152,8 @@ function startSlider(event) {
   if (sliderVerified.value) return;
   event.preventDefault();
   sliderDragging.value = true;
+  sliderStartedAt.value = Date.now();
+  sliderEndedAt.value = 0;
   fieldErrors.slider = "";
   moveSlider(event);
   window.addEventListener("pointermove", moveSlider);
@@ -160,6 +166,7 @@ function moveSlider(event) {
 }
 
 function stopSlider() {
+  sliderEndedAt.value = Date.now();
   if (Math.abs(sliderValue.value - sliderTarget.value) <= 3) {
     sliderValue.value = sliderTarget.value;
     sliderVerified.value = true;
@@ -197,7 +204,9 @@ async function sendSms() {
       body: JSON.stringify({
         phone: form.phone,
         sliderToken: sliderToken.value,
-        sliderValue: sliderValue.value
+        sliderValue: sliderValue.value,
+        sliderStartedAt: sliderStartedAt.value,
+        sliderEndedAt: sliderEndedAt.value
       })
     });
     notice.value = "验证码已发送，请查看后端终端里的开发环境验证码";

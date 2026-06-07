@@ -55,6 +55,25 @@ export const useCartStore = defineStore("cart", {
       localStorage.setItem(CART_KEY, JSON.stringify(this.items));
     },
 
+    setItems(items = []) {
+      this.items = items.map((item) => ({
+        productId: item.productId,
+        name: item.name,
+        image: item.image || "",
+        price: Number(item.price || 0),
+        stock: Number(item.stock || 0),
+        quantity: Number(item.quantity || 1)
+      }));
+      this.selectedIds = this.items.map((item) => String(item.productId));
+      this.saveCart();
+    },
+
+    async loadRemoteCart() {
+      const items = await request("/api/cart");
+      this.setItems(items);
+      return this.items;
+    },
+
     async addProduct(product, quantity = 1, syncBackend = false) {
       const maxQuantity = Number(product.stock || 0);
       const safeQuantity = normalizeQuantity(quantity, maxQuantity);
@@ -77,10 +96,11 @@ export const useCartStore = defineStore("cart", {
       if (!this.selectedIds.includes(String(product.id))) this.selectedIds.push(String(product.id));
       this.saveCart();
       if (syncBackend) {
-        await request("/api/cart", {
+        const items = await request("/api/cart", {
           method: "POST",
-          body: JSON.stringify({ productId: product.id, quantity: safeQuantity })
+          body: { productId: product.id, quantity: safeQuantity }
         });
+        this.setItems(items);
       }
     },
 
@@ -91,10 +111,25 @@ export const useCartStore = defineStore("cart", {
       this.saveCart();
     },
 
+    async syncQuantity(productId, quantity) {
+      this.updateQuantity(productId, quantity);
+      const items = await request(`/api/cart/${productId}`, {
+        method: "PATCH",
+        body: { quantity }
+      });
+      this.setItems(items);
+    },
+
     removeProduct(productId) {
       this.items = this.items.filter((item) => item.productId !== productId);
       this.selectedIds = this.selectedIds.filter((id) => id !== String(productId));
       this.saveCart();
+    },
+
+    async syncRemoveProduct(productId) {
+      this.removeProduct(productId);
+      const items = await request(`/api/cart/${productId}`, { method: "DELETE" });
+      this.setItems(items);
     },
 
     toggleSelected(productId, checked) {

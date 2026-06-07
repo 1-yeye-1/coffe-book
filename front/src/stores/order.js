@@ -175,6 +175,19 @@ export const useOrderStore = defineStore("order", {
       return this.sortedOrders;
     },
 
+    async fetchOrders() {
+      const orders = await request("/api/orders");
+      return this.mergeRemoteOrders(orders);
+    },
+
+    async fetchOrder(id) {
+      const local = this.getOrderById(id);
+      const backendId = local?.backendId || (String(id).startsWith("ORDER") ? "" : id);
+      if (!backendId) return local;
+      const order = await request(`/api/orders/${backendId}`);
+      return this.upsertOrder(order);
+    },
+
     async createOrder(payload) {
       const remote = await request("/api/orders", {
         method: "POST",
@@ -253,9 +266,13 @@ export const useOrderStore = defineStore("order", {
       return this.upsertOrder({ ...order, ...data.order, payment: data });
     },
 
-    cancelOrder(id) {
+    async cancelOrder(id) {
       const order = this.getOrderById(id);
       if (!order || order.paymentStatus === "success") return order;
+      if (order.backendId) {
+        const remote = await request(`/api/orders/${order.backendId}/cancel`, { method: "POST" });
+        return this.upsertOrder(remote);
+      }
       return this.upsertOrder({ ...order, orderStatus: "cancelled", paymentStatus: "unpaid" });
     },
 

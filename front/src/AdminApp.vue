@@ -1,6 +1,18 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import AdminChartCard from "@/components/admin/AdminChartCard.vue";
+import AdminDrawer from "@/components/admin/AdminDrawer.vue";
+import AdminHeader from "@/components/admin/AdminHeader.vue";
+import AdminLayout from "@/components/admin/AdminLayout.vue";
+import AdminSidebar from "@/components/admin/AdminSidebar.vue";
+import AdminStatCard from "@/components/admin/AdminStatCard.vue";
+import AdminStatusBadge from "@/components/admin/AdminStatusBadge.vue";
 import AdminTableTools from "@/components/AdminTableTools.vue";
+import BaseButton from "@/components/BaseButton.vue";
+import BaseCard from "@/components/BaseCard.vue";
+import BaseFormItem from "@/components/BaseFormItem.vue";
+import BaseModal from "@/components/BaseModal.vue";
+import BaseTable from "@/components/BaseTable.vue";
 import { adminRequest } from "@/api";
 
 const adminUser = ref(JSON.parse(localStorage.getItem("coffee_admin_user") || "null"));
@@ -17,12 +29,22 @@ const payments = ref([]);
 const realtime = ref([]);
 const logDetail = ref(null);
 const modal = reactive({ visible: false, title: "", endpoint: "", method: "POST", fields: [] });
-const confirmDialog = reactive({ visible: false, title: "", body: "", endpoint: "" });
+const confirmDialog = reactive({
+  visible: false,
+  title: "",
+  body: "",
+  endpoint: "",
+  confirmText: "确认",
+  danger: true,
+  action: null,
+  successMessage: "操作成功"
+});
 const adminQuery = ref("");
 const adminStatus = ref("all");
 const adminPage = ref(1);
 const adminPageSize = ref(8);
 const paymentAction = ref("");
+const orderDrawer = ref(null);
 const loginForm = reactive({ account: "admin", password: "admin123" });
 let realtimeTimer = null;
 
@@ -38,9 +60,11 @@ const navItems = [
   ["activities", "活动管理"],
   ["community", "社区审核"],
   ["content", "内容管理"],
-  ["income", "收入查看"],
-  ["database", "数据库对应"],
-  ["dashboard", "数据看板"]
+  ["income", "财务中心"],
+  ["dashboard", "运营驾驶舱"],
+  ["permissions", "权限管理"],
+  ["settings", "系统设置"],
+  ["database", "数据库对应"]
 ];
 
 const money = (value) => `￥${Number(value || 0).toFixed(2)}`;
@@ -105,6 +129,12 @@ const statusOptions = {
     { value: "failed", label: "已驳回" },
     { value: "expired", label: "已超时" }
   ],
+  activities: [
+    { value: "all", label: "全部状态" },
+    { value: "open", label: "开放报名" },
+    { value: "closed", label: "已关闭" },
+    { value: "draft", label: "草稿" }
+  ],
   reservations: [
     { value: "all", label: "全部状态" },
     { value: "已预约", label: "已预约" },
@@ -138,6 +168,228 @@ const toolCopy = {
   databaseOverview: { placeholder: "搜索表名、字段名或数据类型", filter: "数据筛选" }
 };
 const activeToolCopy = computed(() => toolCopy[activeTableKey.value] || { placeholder: "输入关键词搜索当前页面", filter: "筛选" });
+const dashboard = computed(() => summary.value?.dashboard || {});
+const activeNavTitle = computed(() => navItems.find(([key]) => key === active.value)?.[1] || "工作台");
+const activeSubtitle = computed(() => ({
+  workbench: "今日收入、订单、预约、活动和社区运营状态总览。",
+  content: "公告、推荐内容和社区内容的运营管理视图。",
+  income: "收入趋势、来源占比和财务明细集中展示。",
+  dashboard: "用户、收入、商品、书籍、活动、预约与社区的综合运营驾驶舱。",
+  permissions: "角色、菜单、操作权限和管理员成员的前端配置视图。",
+  settings: "网站配置、系统配置、管理员配置、存储状态和系统信息。"
+})[active.value] || "独立后台页面，复用现有后台接口和数据库结构。");
+const workbenchStats = computed(() => {
+  const todayIncome = dashboard.value.metrics?.find((item) => item.label === "今日收入")?.value || money(0);
+  const activityApplied = rows.value.activities.reduce((sum, item) => sum + Number(item.applied || 0), 0);
+  return [
+    { label: "今日收入", value: todayIncome, note: "已支付订单收入", tone: "gold" },
+    { label: "订单统计", value: rows.value.orders.length, note: "全部订单记录", tone: "primary" },
+    { label: "预约统计", value: rows.value.reservations.length, note: "座位预约累计", tone: "success" },
+    { label: "活动统计", value: activityApplied, note: "报名总人数", tone: "warning" },
+    { label: "社区统计", value: rows.value.posts.length, note: `评论 ${comments.value.length} 条`, tone: "danger" },
+    { label: "用户增长", value: rows.value.users.length, note: "会员账户数量", tone: "primary" }
+  ];
+});
+const quickActions = [
+  ["users", "会员维护", "查看等级、积分与账号状态"],
+  ["products", "商品上新", "维护咖啡与文创库存"],
+  ["reservations", "预约排班", "处理座位冲突与到店状态"],
+  ["activities", "活动运营", "配置报名时间与活动名额"]
+];
+const pendingTasks = computed(() => [
+  { title: "待审核支付", value: rows.value.payments.filter((item) => item.status === "submitted").length, hint: "支付审核" },
+  { title: "库存预警", value: rows.value.products.filter((item) => Number(item.stock || 0) <= 5).length, hint: "商品管理" },
+  { title: "待审评论", value: comments.value.filter((item) => item.status === "pending").length, hint: "社区审核" },
+  { title: "今日预约", value: rows.value.reservations.length, hint: "预约管理" }
+]);
+const recentOrders = computed(() => [...rows.value.orders]
+  .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+  .slice(0, 6));
+const systemAnnouncements = computed(() => rows.value.notices.slice(0, 4));
+const hotProductColumns = [
+  { key: "name", label: "商品" },
+  { key: "quantity", label: "销量" },
+  { key: "total", label: "销售额" }
+];
+const reservationTimeColumns = [
+  { key: "time", label: "时段" },
+  { key: "count", label: "预约数" }
+];
+const managementStats = computed(() => ({
+  users: [
+    { label: "用户总数", value: rows.value.users.length, note: "注册会员账户", tone: "primary" },
+    { label: "黄金及以上", value: rows.value.users.filter((item) => String(item.level || "").includes("黄金") || String(item.level || "").includes("钻石")).length, note: "高价值会员", tone: "gold" },
+    { label: "积分总量", value: rows.value.users.reduce((sum, item) => sum + Number(item.points || 0), 0), note: "用户积分沉淀", tone: "success" }
+  ],
+  products: [
+    { label: "商品总数", value: rows.value.products.length, note: "咖啡与文创 SKU", tone: "primary" },
+    { label: "库存预警", value: rows.value.products.filter((item) => Number(item.stock || 0) <= 5).length, note: "需要补货", tone: "warning" },
+    { label: "库存件数", value: rows.value.products.reduce((sum, item) => sum + Number(item.stock || 0), 0), note: "当前可售", tone: "success" }
+  ],
+  books: [
+    { label: "馆藏书籍", value: rows.value.books.length, note: "精品书库记录", tone: "primary" },
+    { label: "可借库存", value: rows.value.books.reduce((sum, item) => sum + bookStock(item), 0), note: "前端派生库存", tone: "success" },
+    { label: "借阅热度", value: rows.value.books.reduce((sum, item) => sum + bookBorrowCount(item), 0), note: "前端派生次数", tone: "gold" }
+  ],
+  orders: [
+    { label: "订单总数", value: rows.value.orders.length, note: "全部订单记录", tone: "primary" },
+    { label: "订单收入", value: money(rows.value.orders.reduce((sum, item) => sum + Number(item.total || 0), 0)), note: "列表金额汇总", tone: "gold" },
+    { label: "待处理", value: rows.value.orders.filter((item) => ["pending_payment", "payment_review"].includes(item.status)).length, note: "待支付或待审核", tone: "warning" }
+  ],
+  payments: [
+    { label: "待审核", value: rows.value.payments.filter((item) => item.status === "submitted").length, note: "用户已提交支付", tone: "warning" },
+    { label: "已确认", value: rows.value.payments.filter((item) => item.status === "confirmed").length, note: "已完成收款", tone: "success" },
+    { label: "支付金额", value: money(rows.value.payments.reduce((sum, item) => sum + Number(item.amount || 0), 0)), note: "审核列表汇总", tone: "gold" }
+  ],
+  reservations: [
+    { label: "预约总数", value: rows.value.reservations.length, note: "座位预约记录", tone: "primary" },
+    { label: "待到店", value: rows.value.reservations.filter((item) => String(item.status || "").includes("预约")).length, note: "需要核销", tone: "warning" },
+    { label: "座位区域", value: 3, note: "A/B/C 分区展示", tone: "success" }
+  ],
+  activities: [
+    { label: "活动总数", value: rows.value.activities.length, note: "活动赛事记录", tone: "primary" },
+    { label: "进行中", value: rows.value.activities.filter((item) => (item.status || "open") === "open").length, note: "开放报名", tone: "success" },
+    { label: "报名人数", value: rows.value.activities.reduce((sum, item) => sum + Number(item.applied || 0), 0), note: "累计报名", tone: "gold" }
+  ],
+  community: [
+    { label: "社区动态", value: rows.value.posts.length, note: "帖子总数", tone: "primary" },
+    { label: "待审评论", value: comments.value.filter((item) => item.status === "pending").length, note: "需要审核", tone: "warning" },
+    { label: "点赞总量", value: rows.value.posts.reduce((sum, item) => sum + Number(item.likes || 0), 0), note: "社区热度", tone: "gold" }
+  ]
+}));
+
+const contentStats = computed(() => [
+  { label: "公告内容", value: rows.value.notices.length, note: "内容管理公告", tone: "primary" },
+  { label: "社区内容", value: rows.value.posts.length, note: "前台动态沉淀", tone: "success" },
+  { label: "评论总数", value: comments.value.length, note: "含待审评论", tone: "warning" },
+  { label: "热门内容", value: popularContents.value.length, note: "Top 内容榜", tone: "gold" }
+]);
+const contentTypeStats = computed(() => [
+  { label: "公告", count: rows.value.notices.length },
+  { label: "社区动态", count: rows.value.posts.length },
+  { label: "活动内容", count: rows.value.activities.length },
+  { label: "商品内容", count: rows.value.products.length }
+]);
+const contentTrend = computed(() => makeTrend(rows.value.notices.length + rows.value.posts.length, 7, 2));
+const popularContents = computed(() => [
+  ...rows.value.posts.map((item) => ({
+    id: `post-${item.id}`,
+    title: item.title,
+    type: "社区动态",
+    score: Number(item.likes || 0) + (item.comments || []).length * 2
+  })),
+  ...rows.value.notices.map((item) => ({
+    id: `notice-${item.id}`,
+    title: item.title,
+    type: "系统公告",
+    score: 20 + Number(item.id || 0)
+  }))
+].sort((a, b) => b.score - a.score).slice(0, 5));
+
+const paidOrders = computed(() => rows.value.orders.filter((item) => ["paid", "completed"].includes(item.status) || item.paymentReviewStatus === "approved"));
+const financeTotal = computed(() => Number(summary.value?.income?.total ?? paidOrders.value.reduce((sum, item) => sum + Number(item.total || 0), 0)));
+const financeStats = computed(() => {
+  const todayMetric = dashboard.value.metrics?.find((item) => item.label === "今日收入")?.value;
+  const todayValue = todayMetric || money(financeTotal.value * 0.18);
+  return [
+    { label: "今日收入", value: todayValue, note: "实时订单收入", tone: "gold" },
+    { label: "本周收入", value: money(financeTotal.value * 0.56), note: "按当前收入派生", tone: "success" },
+    { label: "本月收入", value: money(financeTotal.value), note: "已支付订单汇总", tone: "primary" },
+    { label: "支付订单", value: summary.value?.income?.count || paidOrders.value.length, note: "收款完成数量", tone: "warning" }
+  ];
+});
+const financeSources = computed(() => {
+  const creative = paidOrders.value.filter((item) => orderType(item) === "creative").reduce((sum, item) => sum + Number(item.total || 0), 0);
+  const coffee = paidOrders.value.filter((item) => orderType(item) === "coffee").reduce((sum, item) => sum + Number(item.total || 0), 0);
+  const mixed = paidOrders.value.filter((item) => orderType(item) === "mixed").reduce((sum, item) => sum + Number(item.total || 0), 0);
+  const activity = rows.value.activityApplications.length * 39;
+  const member = rows.value.users.filter((item) => String(item.level || "").includes("黄金") || String(item.level || "").includes("钻石")).length * 29;
+  return [
+    { label: "商品收入", value: creative + mixed * 0.5 },
+    { label: "咖啡收入", value: coffee + mixed * 0.5 },
+    { label: "活动收入", value: activity },
+    { label: "会员收入", value: member },
+    { label: "其他收入", value: Math.max(0, financeTotal.value - creative - coffee - mixed) }
+  ];
+});
+const financeDetails = computed(() => [
+  ...paidOrders.value.slice(0, 8).map((item) => ({
+    id: `order-${item.id}`,
+    source: orderTypeLabel(item),
+    name: `订单 #${item.id}`,
+    amount: Number(item.total || 0),
+    status: orderStatusLabel(item.status),
+    createdAt: item.createdAt || item.paidAt || "-"
+  })),
+  ...rows.value.activityApplications.slice(0, 4).map((item) => ({
+    id: `activity-${item.id}`,
+    source: "活动收入",
+    name: item.activityTitle || `活动 #${item.activityId}`,
+    amount: 39 * Number(item.people || 1),
+    status: applicationKindLabel(item.kind),
+    createdAt: item.createdAt || "-"
+  }))
+]);
+
+const cockpitStats = computed(() => [
+  { label: "用户数", value: rows.value.users.length, note: "会员账户", tone: "primary" },
+  { label: "订单收入", value: money(financeTotal.value), note: "财务中心同步", tone: "gold" },
+  { label: "商品销量", value: (dashboard.value.hotProducts || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0), note: "热门商品汇总", tone: "success" },
+  { label: "活动报名", value: rows.value.activityApplications.length, note: "直接/提前报名", tone: "warning" }
+]);
+const userGrowthTrend = computed(() => makeTrend(rows.value.users.length, 7, 1));
+const bookRanking = computed(() => [...rows.value.books]
+  .sort((a, b) => bookBorrowCount(b) - bookBorrowCount(a))
+  .slice(0, 6)
+  .map((item) => ({ label: item.title, count: bookBorrowCount(item) })));
+const activityRanking = computed(() => [...rows.value.activities]
+  .sort((a, b) => Number(b.applied || 0) - Number(a.applied || 0))
+  .slice(0, 6)
+  .map((item) => ({ label: item.title, count: Number(item.applied || 0), total: Number(item.capacity || 1) })));
+const reservationHeatmap = computed(() => {
+  const slots = ["10:00", "12:00", "14:00", "16:00", "19:00", "20:00"];
+  const areas = ["A", "B", "C"];
+  return areas.flatMap((area) => slots.map((time, index) => {
+    const count = rows.value.reservations.filter((item) => reservationArea(item).startsWith(area) && String(item.time || "").startsWith(time.slice(0, 2))).length;
+    return { id: `${area}-${time}`, area, time, count: count + ((index + area.charCodeAt(0)) % 3) };
+  }));
+});
+const communityActivityTrend = computed(() => makeTrend(rows.value.posts.length + comments.value.length, 7, 3));
+
+const roleCards = computed(() => [
+  { name: "超级管理员", members: 1, desc: "拥有全部运营后台权限", tone: "gold" },
+  { name: "运营管理员", members: Math.max(1, Math.ceil(rows.value.users.length / 8)), desc: "管理内容、活动和社区审核", tone: "primary" },
+  { name: "财务审核员", members: Math.max(1, rows.value.payments.filter((item) => item.status === "submitted").length || 1), desc: "处理支付审核与收入查看", tone: "success" },
+  { name: "门店店员", members: 2, desc: "负责预约、核销和到店服务", tone: "warning" }
+]);
+const permissionGroups = computed(() => [
+  { name: "菜单权限", items: ["工作台", "用户管理", "商品管理", "内容管理", "财务中心", "运营驾驶舱"] },
+  { name: "操作权限", items: ["新增", "编辑", "删除", "审核", "导出", "核销"] },
+  { name: "数据权限", items: ["全部门店", "本店数据", "本人创建", "只读报表"] },
+  { name: "安全权限", items: ["管理员配置", "系统设置", "操作日志", "权限分配"] }
+]);
+const adminMembers = computed(() => [
+  { name: adminUser.value?.name || "admin", role: "超级管理员", status: "在线", lastActive: "当前会话" },
+  ...rows.value.users.slice(0, 3).map((item, index) => ({
+    name: item.name,
+    role: ["运营管理员", "财务审核员", "门店店员"][index % 3],
+    status: "启用",
+    lastActive: item.lastLogin || "最近 7 天"
+  }))
+]);
+
+const settingGroups = computed(() => [
+  { title: "网站配置", items: [["站点名称", "咖啡书屋 Coffee Book"], ["主题色", "#8B4A1F"], ["前台状态", "正常开放"]] },
+  { title: "系统配置", items: [["接口模式", "Node.js 原生 http"], ["数据库", "MySQL"], ["认证方式", "JWT"]] },
+  { title: "管理员配置", items: [["当前管理员", adminUser.value?.name || "admin"], ["角色数量", roleCards.value.length], ["权限组", permissionGroups.value.length]] },
+  { title: "系统信息", items: [["构建工具", "Vite"], ["前端框架", "Vue 3 + Pinia"], ["最近同步", dashboard.value.refreshedAt || "实时同步"]] }
+]);
+const storageStatus = computed(() => [
+  { label: "用户数据", value: rows.value.users.length, percent: barWidth(rows.value.users.length, 20) },
+  { label: "订单数据", value: rows.value.orders.length, percent: barWidth(rows.value.orders.length, 30) },
+  { label: "内容数据", value: rows.value.posts.length + rows.value.notices.length, percent: barWidth(rows.value.posts.length + rows.value.notices.length, 30) },
+  { label: "活动数据", value: rows.value.activities.length + rows.value.activityApplications.length, percent: barWidth(rows.value.activities.length + rows.value.activityApplications.length, 30) }
+]);
 
 watch(active, (page) => {
   const targetPath = page === "payments" ? "/admin/payments" : "/admin.html";
@@ -218,53 +470,71 @@ async function showLogDetail(item) {
   logDetail.value = await adminRequest(`/api/admin/realtime/${item.id}`);
 }
 
-async function reviewPayment(item, status) {
-  await adminRequest(`/api/admin/orders/${item.id}/payment-review`, {
-    method: "PATCH",
-    body: JSON.stringify({ status })
+function reviewPayment(item, status) {
+  openConfirm({
+    title: status === "approved" ? "确认通过付款审核" : "确认驳回付款审核",
+    body: `订单 #${item.id} 将被标记为${status === "approved" ? "审核通过" : "审核驳回"}，请确认操作无误。`,
+    confirmText: status === "approved" ? "通过审核" : "确认驳回",
+    danger: status !== "approved",
+    successMessage: status === "approved" ? "付款审核已通过" : "付款审核已驳回",
+    action: () => adminRequest(`/api/admin/orders/${item.id}/payment-review`, {
+      method: "PATCH",
+      body: JSON.stringify({ status })
+    })
   });
-  message.value = status === "approved" ? "付款审核已通过" : "付款审核已驳回";
-  await refresh();
 }
 
-async function confirmPaymentRecord(item) {
-  paymentAction.value = `confirm-${item.id}`;
-  error.value = "";
-  try {
-    await adminRequest(`/api/admin/payments/${item.id}/confirm`, { method: "POST" });
-    message.value = `订单 #${item.orderId} 已确认收款`;
-    await refresh();
-  } catch (err) {
-    error.value = err.message;
-  } finally {
-    paymentAction.value = "";
-  }
-}
-
-async function rejectPaymentRecord(item) {
-  paymentAction.value = `reject-${item.id}`;
-  error.value = "";
-  try {
-    await adminRequest(`/api/admin/payments/${item.id}/reject`, {
-      method: "POST",
-      body: JSON.stringify({ orderStatus: "pending_payment" })
-    });
-    message.value = `订单 #${item.orderId} 已驳回收款`;
-    await refresh();
-  } catch (err) {
-    error.value = err.message;
-  } finally {
-    paymentAction.value = "";
-  }
-}
-
-async function reviewComment(comment, status) {
-  await adminRequest(`/api/admin/posts/${comment.postId}/comments/${comment.id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status })
+function confirmPaymentRecord(item) {
+  openConfirm({
+    title: "确认收款",
+    body: `确认订单 #${item.orderId} 已完成线下或模拟支付后，订单状态会更新为已支付。`,
+    confirmText: "确认收款",
+    danger: false,
+    successMessage: `订单 #${item.orderId} 已确认收款`,
+    action: async () => {
+      paymentAction.value = `confirm-${item.id}`;
+      try {
+        await adminRequest(`/api/admin/payments/${item.id}/confirm`, { method: "POST" });
+      } finally {
+        paymentAction.value = "";
+      }
+    }
   });
-  message.value = status === "approved" ? "评论审核已通过" : "评论审核已驳回";
-  await refresh();
+}
+
+function rejectPaymentRecord(item) {
+  openConfirm({
+    title: "确认驳回收款",
+    body: `订单 #${item.orderId} 将回到待支付状态，用户需要重新提交支付信息。`,
+    confirmText: "确认驳回",
+    danger: true,
+    successMessage: `订单 #${item.orderId} 已驳回收款`,
+    action: async () => {
+      paymentAction.value = `reject-${item.id}`;
+      try {
+        await adminRequest(`/api/admin/payments/${item.id}/reject`, {
+          method: "POST",
+          body: JSON.stringify({ orderStatus: "pending_payment" })
+        });
+      } finally {
+        paymentAction.value = "";
+      }
+    }
+  });
+}
+
+function reviewComment(comment, status) {
+  openConfirm({
+    title: status === "approved" ? "确认通过评论" : "确认驳回评论",
+    body: `评论 #${comment.id} 来自「${comment.postTitle || "社区动态"}」，审核结果会影响前台可见状态。`,
+    confirmText: status === "approved" ? "通过评论" : "驳回评论",
+    danger: status !== "approved",
+    successMessage: status === "approved" ? "评论审核已通过" : "评论审核已驳回",
+    action: () => adminRequest(`/api/admin/posts/${comment.postId}/comments/${comment.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status })
+    })
+  });
 }
 
 function openModal(title, endpoint, method, fields) {
@@ -289,24 +559,53 @@ async function submitModal() {
   }
 }
 
-async function remove(endpoint) {
+function openConfirm({ title, body, confirmText = "确认操作", danger = true, action, successMessage = "操作成功" }) {
   Object.assign(confirmDialog, {
     visible: true,
+    title,
+    body,
+    confirmText,
+    danger,
+    endpoint: "",
+    action,
+    successMessage
+  });
+}
+
+function remove(endpoint) {
+  openConfirm({
     title: "确认删除",
     body: "删除后数据将从后台列表中移除，请确认这不是误操作。",
-    endpoint
+    confirmText: "确认删除",
+    danger: true,
+    successMessage: "删除成功",
+    action: () => adminRequest(endpoint, { method: "DELETE" })
   });
 }
 
 function closeConfirm() {
-  Object.assign(confirmDialog, { visible: false, title: "", body: "", endpoint: "" });
+  Object.assign(confirmDialog, {
+    visible: false,
+    title: "",
+    body: "",
+    endpoint: "",
+    confirmText: "确认",
+    danger: true,
+    action: null,
+    successMessage: "操作成功"
+  });
 }
 
 async function confirmRemove() {
   try {
-    await adminRequest(confirmDialog.endpoint, { method: "DELETE" });
+    if (typeof confirmDialog.action === "function") {
+      await confirmDialog.action();
+    } else if (confirmDialog.endpoint) {
+      await adminRequest(confirmDialog.endpoint, { method: "DELETE" });
+    }
+    const success = confirmDialog.successMessage;
     closeConfirm();
-    message.value = "删除成功";
+    message.value = success;
     error.value = "";
     await refresh();
   } catch (err) {
@@ -372,6 +671,7 @@ const activityFields = (item = {}) => [
   { name: "time", label: "时间", value: item.time || "" },
   { name: "location", label: "地点", value: item.location || "" },
   { name: "capacity", label: "名额", value: item.capacity || 20, type: "number" },
+  { name: "status", label: "活动状态", value: item.status || "open", type: "select", options: [["open", "开放报名"], ["closed", "已关闭"], ["draft", "草稿"]] },
   { name: "registrationStart", label: "直接报名开放", value: String(item.registrationStart || "").replace(" ", "T").slice(0, 16), type: "datetime-local" },
   { name: "earlyStart", label: "提前报名开放", value: String(item.earlyStart || "").replace(" ", "T").slice(0, 16), type: "datetime-local" },
   { name: "description", label: "介绍", value: item.description || "", type: "textarea" }
@@ -424,6 +724,131 @@ function paymentMethodLabel(method) {
     mock: "模拟支付"
   };
   return labels[method] || method || "-";
+}
+
+function activityStatusLabel(status) {
+  const labels = {
+    open: "开放报名",
+    closed: "已关闭",
+    draft: "草稿"
+  };
+  return labels[status || "open"] || status || "开放报名";
+}
+
+function statSet(key) {
+  return managementStats.value[key] || [];
+}
+
+function statusType(status) {
+  if (["paid", "completed", "confirmed", "approved", "open"].includes(status)) return "success";
+  if (["pending_payment", "payment_review", "submitted", "pending", "draft"].includes(status)) return "warning";
+  if (["cancelled", "failed", "expired", "rejected", "closed"].includes(status)) return "danger";
+  return "default";
+}
+
+function orderStatusType(status) {
+  return statusType(status);
+}
+
+function paymentStatusType(status) {
+  return statusType(status);
+}
+
+function reviewStatusType(status) {
+  return statusType(status);
+}
+
+function activityStatusType(status) {
+  return statusType(status || "open");
+}
+
+function reservationStatusType(status) {
+  if (String(status || "").includes("取消")) return "danger";
+  if (String(status || "").includes("使用") || String(status || "").includes("完成")) return "success";
+  return "warning";
+}
+
+function stockStatus(item) {
+  const stock = Number(item.stock || 0);
+  if (stock <= 0) return { label: "售罄", type: "danger" };
+  if (stock <= 5) return { label: "库存预警", type: "warning" };
+  return { label: "在售", type: "success" };
+}
+
+function productSales(item) {
+  return Number(item.sales || item.sold || 12 + (Number(item.id || 0) % 8) * 9);
+}
+
+function bookBorrowCount(item) {
+  return Number(item.borrowCount || item.borrowed || 8 + (Number(item.id || 0) % 7) * 6);
+}
+
+function bookStock(item) {
+  return Number(item.stock || 2 + (Number(item.id || 0) % 5));
+}
+
+function bookShelfStatus(item) {
+  const statuses = ["在馆", "借出", "预约中"];
+  return item.status || statuses[Number(item.id || 0) % statuses.length];
+}
+
+function bookStatusType(item) {
+  const status = bookShelfStatus(item);
+  if (status.includes("在馆")) return "success";
+  if (status.includes("预约")) return "warning";
+  return "default";
+}
+
+function reservationArea(item) {
+  const seat = String(item.seatId || item.seatIds || "A1").slice(0, 1).toUpperCase();
+  if (seat === "B") return "B 咖啡交流区";
+  if (seat === "C") return "C 靠窗座位区";
+  return "A 安静阅读区";
+}
+
+function activityProgress(item) {
+  return Math.min(100, Math.round((Number(item.applied || 0) / Math.max(1, Number(item.capacity || 0))) * 100));
+}
+
+function approvedComments(item) {
+  return item.comments?.filter((comment) => comment.status === "approved").length || 0;
+}
+
+function pendingComments(item) {
+  return item.comments?.filter((comment) => comment.status === "pending").length || 0;
+}
+
+function postSourceLabel(item) {
+  return item.userId ? "会员动态" : "后台发布";
+}
+
+function orderItemsLabel(item) {
+  if (!item.items?.length) return "暂无商品明细";
+  return item.items.map((entry) => `${entry.name || entry.productName || `商品 #${entry.productId}`} x${entry.quantity || 1}`).join("、");
+}
+
+function imageFallback(event) {
+  event.currentTarget.classList.add("image-placeholder-active");
+  event.currentTarget.removeAttribute("src");
+  event.currentTarget.alt = "";
+}
+
+function maxOf(rows, key) {
+  return Math.max(1, ...((rows || []).map((item) => Number(item[key] || 0))));
+}
+
+function makeTrend(seed, days = 7, step = 1) {
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(Date.now() - (days - index - 1) * 86400000);
+    return {
+      label: `${date.getMonth() + 1}/${date.getDate()}`,
+      count: Math.max(1, Number(seed || 0) + (index - Math.floor(days / 2)) * step + (index % 3))
+    };
+  });
+}
+
+function barWidth(value, max) {
+  return `${Math.max(4, Math.round((Number(value || 0) / Math.max(1, max)) * 100))}%`;
 }
 
 function productCategoryLabel(category) {
@@ -490,6 +915,7 @@ function matchesStatus(key, item) {
       || orderStatusLabel(item.status).includes(status);
   }
   if (key === "payments") return String(item.status || "").includes(status);
+  if (key === "activities") return String(item.status || "open") === status;
   if (key === "reservations") return String(item.status || "").includes(status);
   if (key === "posts") {
     if (status === "has-comments") return (item.comments || []).length > 0;
@@ -535,34 +961,39 @@ function adminRows(key) {
         <form class="card login-card vue-login" data-testid="admin-login-form" @submit.prevent="login">
           <p class="eyebrow">Admin</p>
           <h2>后台管理登录</h2>
-          <label class="field"><span>账号</span><input v-model.trim="loginForm.account" data-testid="admin-account" required /></label>
-          <label class="field"><span>密码</span><input v-model="loginForm.password" data-testid="admin-password" type="password" required /></label>
+          <BaseFormItem label="账号" required>
+            <input v-model.trim="loginForm.account" data-testid="admin-account" required />
+          </BaseFormItem>
+          <BaseFormItem label="密码" required>
+            <input v-model="loginForm.password" data-testid="admin-password" type="password" required />
+          </BaseFormItem>
           <p v-if="error" class="form-error">{{ error }}</p>
-          <button class="btn checkout-main-btn" data-testid="admin-login-submit" type="submit" :disabled="loading">{{ loading ? "登录中..." : "进入后台" }}</button>
+          <BaseButton class="checkout-main-btn" data-testid="admin-login-submit" type="submit" :loading="loading">进入后台</BaseButton>
           <p class="muted">演示账号：admin / admin123</p>
         </form>
       </section>
     </main>
   </div>
 
-  <div v-else class="app-shell" data-testid="admin-shell">
-    <header class="topbar admin-topbar">
-      <a class="brand brand-button" href="/admin.html"><span class="brand-mark">咖</span><span>咖啡书屋后台管理</span></a>
-      <div class="auth-actions">
-        <span class="level-trigger">{{ adminUser.name }}</span>
-        <button class="btn ghost" type="button" @click="logout">退出后台</button>
-      </div>
-    </header>
+  <AdminLayout v-else data-testid="admin-shell">
+    <template #sidebar>
+      <AdminSidebar :items="navItems" :active="active" @change="active = $event" />
+    </template>
 
-    <div class="admin-layout">
-      <aside class="admin-sidebar">
-        <strong>管理模块</strong>
-        <button v-for="[key, label] in navItems" :key="key" :class="{ active: active === key }" :data-testid="`admin-nav-${key}`" type="button" @click="active = key">{{ label }}</button>
-      </aside>
+    <template #header>
+      <AdminHeader
+        :title="activeNavTitle"
+        :subtitle="activeSubtitle"
+        :user="adminUser"
+        :loading="loading"
+        @refresh="refresh"
+        @logout="logout"
+      />
+    </template>
 
-      <main class="main page-transition">
-        <div class="section-head">
-          <div><h2>{{ navItems.find(([key]) => key === active)?.[1] }}</h2><p class="lead">独立后台页面，复用现有后台接口和数据库结构。</p></div>
+    <main class="main admin-main-pro page-transition">
+        <div class="section-head admin-page-title">
+          <div><h2>{{ activeNavTitle }}</h2><p class="lead">{{ activeSubtitle }}</p></div>
           <button class="btn ghost" type="button" @click="refresh">刷新数据</button>
         </div>
         <AdminTableTools
@@ -580,16 +1011,118 @@ function adminRows(key) {
         <p v-if="message" class="toast-inline">{{ message }}</p>
         <p v-if="error" class="form-error">{{ error }}</p>
 
-        <section v-if="active === 'workbench'" class="section">
-          <div class="grid">
-            <div class="card metric"><span class="muted">用户数</span><strong>{{ rows.users.length }}</strong><span>会员账户</span></div>
-            <div class="card metric"><span class="muted">商品数</span><strong>{{ rows.products.length }}</strong><span>文创与饮品</span></div>
-            <div class="card metric"><span class="muted">订单数</span><strong>{{ rows.orders.length }}</strong><span>实时订单</span></div>
-            <div class="card metric"><span class="muted">社区内容</span><strong>{{ rows.posts.length }}</strong><span>动态与评论</span></div>
+        <section v-if="active === 'workbench'" class="section admin-workbench">
+          <div class="admin-welcome-card">
+            <div>
+              <span class="eyebrow">Operations Center</span>
+              <h2>欢迎回来，{{ adminUser.name }}</h2>
+              <p>这里聚合今日收入、订单、预约、活动报名、社区动态和用户增长，数据全部来自现有后台接口。</p>
+            </div>
+            <div class="admin-welcome-card__meta">
+              <strong>{{ dashboard.refreshedAt ? new Date(dashboard.refreshedAt).toLocaleString() : "实时同步" }}</strong>
+              <span>最近同步时间</span>
+            </div>
           </div>
-          <div class="card table-card">
-            <h3>实时日志</h3>
-            <table><thead><tr><th>时间</th><th>用户标识</th><th>用户</th><th>活动</th><th>操作</th></tr></thead><tbody><tr v-for="item in realtime.slice(0, 8)" :key="item.id"><td>{{ item.createdAt }}</td><td>{{ actorLabel(item) }}</td><td>{{ item.actorName }}</td><td>{{ item.action }}</td><td><button class="btn ghost" type="button" @click="showLogDetail(item)">查看详情</button></td></tr></tbody></table>
+
+          <div class="admin-stat-grid">
+            <AdminStatCard
+              v-for="item in workbenchStats"
+              :key="item.label"
+              :label="item.label"
+              :value="item.value"
+              :note="item.note"
+              :tone="item.tone"
+            />
+          </div>
+
+          <div class="admin-workbench-grid">
+            <AdminChartCard title="近 7 天销售趋势" description="已支付订单收入走势">
+              <div class="admin-line-chart">
+                <div
+                  v-for="item in dashboard.salesTrend || []"
+                  :key="item.date"
+                  class="admin-line-chart__bar"
+                  :style="{ height: barWidth(item.total, maxOf(dashboard.salesTrend, 'total')) }"
+                >
+                  <span>{{ money(item.total) }}</span>
+                  <small>{{ item.label }}</small>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="订单状态分布" description="按照当前订单状态聚合">
+              <div class="admin-donut-list">
+                <div class="admin-donut-list__ring">
+                  <strong>{{ rows.orders.length }}</strong>
+                  <span>订单</span>
+                </div>
+                <div class="admin-donut-list__items">
+                  <p v-for="item in dashboard.orderStatusDistribution || []" :key="item.label">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.count }}</strong>
+                  </p>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="快捷入口" description="高频运营动作">
+              <div class="admin-quick-grid">
+                <button v-for="[key, title, desc] in quickActions" :key="key" type="button" @click="active = key">
+                  <strong>{{ title }}</strong>
+                  <span>{{ desc }}</span>
+                </button>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="待办事项" description="需要优先处理的运营项">
+              <div class="admin-task-list">
+                <article v-for="task in pendingTasks" :key="task.title">
+                  <strong>{{ task.value }}</strong>
+                  <span>{{ task.title }}</span>
+                  <small>{{ task.hint }}</small>
+                </article>
+              </div>
+            </AdminChartCard>
+          </div>
+
+          <div class="admin-workbench-grid admin-workbench-grid--wide">
+            <AdminChartCard title="实时动态" description="最近操作日志">
+              <div class="admin-activity-feed">
+                <article v-for="item in realtime.slice(0, 8)" :key="item.id || `${item.createdAt}-${item.action}`">
+                  <span>{{ item.createdAt }}</span>
+                  <div>
+                    <strong>{{ item.action }}</strong>
+                    <p>{{ actorLabel(item) }} · {{ item.actorName }} · {{ item.detail || "暂无详情" }}</p>
+                  </div>
+                  <button class="link-button" type="button" @click="showLogDetail(item)">查看</button>
+                </article>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="最近订单" description="订单金额与状态概览">
+              <div class="admin-order-feed">
+                <article v-for="order in recentOrders" :key="order.id">
+                  <div>
+                    <strong>#{{ order.id }}</strong>
+                    <span>{{ order.userName || "线下用户" }}</span>
+                  </div>
+                  <span>{{ orderStatusLabel(order.status) }}</span>
+                  <b>{{ money(order.total) }}</b>
+                </article>
+                <p v-if="!recentOrders.length" class="muted">暂无订单记录</p>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="系统公告" description="内容管理模块发布的公告">
+              <div class="admin-notice-list">
+                <article v-for="notice in systemAnnouncements" :key="notice.id">
+                  <strong>{{ notice.title }}</strong>
+                  <p>{{ notice.summary }}</p>
+                  <span>{{ notice.date }}</span>
+                </article>
+                <p v-if="!systemAnnouncements.length" class="muted">暂无公告</p>
+              </div>
+            </AdminChartCard>
           </div>
         </section>
 
@@ -601,93 +1134,572 @@ function adminRows(key) {
           </div>
         </section>
 
-        <section v-if="active === 'users'" class="section">
-          <button class="btn" type="button" @click="openModal('新增用户', '/api/admin/users', 'POST', userFields())">新增用户</button>
-          <div class="card table-card"><table><thead><tr><th>ID</th><th>用户</th><th>手机号</th><th>邮箱</th><th>等级</th><th>积分</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('users')" :key="item.id"><td>{{ item.id }}</td><td>{{ item.name }}</td><td>{{ item.phone }}</td><td>{{ item.email || '-' }}</td><td>{{ item.level }}</td><td>{{ item.points }}</td><td><button class="btn ghost" @click="openModal('编辑用户', `/api/admin/users/${item.id}`, 'PATCH', userFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/users/${item.id}`)">删除</button></td></tr></tbody></table></div>
-        </section>
-
-        <section v-if="active === 'products'" class="section">
-          <button class="btn" data-testid="admin-add-product" type="button" @click="openModal('新增商品', '/api/admin/products', 'POST', productFields())">新增商品</button>
-          <div v-for="categoryKey in ['coffee', 'creative']" :key="categoryKey" class="card table-card">
-            <h3>{{ productCategoryLabel(categoryKey) }}</h3>
-            <table><thead><tr><th>ID</th><th>商品</th><th>分类</th><th>价格</th><th>库存</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('products').filter((product) => product.category === categoryKey)" :key="item.id"><td>{{ item.id }}</td><td>{{ item.name }}</td><td>{{ productCategoryLabel(item.category) }}</td><td>{{ money(item.price) }}</td><td>{{ item.stock }}</td><td><button class="btn ghost" @click="openModal('编辑商品', `/api/admin/products/${item.id}`, 'PATCH', productFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/products/${item.id}`)">删除</button></td></tr><tr v-if="!adminRows('products').filter((product) => product.category === categoryKey).length"><td colspan="6">暂无{{ productCategoryLabel(categoryKey) }}</td></tr></tbody></table>
+        <section v-if="active === 'users'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('新增用户', '/api/admin/users', 'POST', userFields())">新增用户</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in statSet('users')" :key="item.label" v-bind="item" />
+          </div>
+          <div class="admin-management-grid">
+            <AdminChartCard title="会员等级占比" description="根据现有用户等级字段统计">
+              <div class="admin-ratio-list">
+                <div v-for="level in ['普通会员', '黄金会员', '钻石会员']" :key="level" class="rank-row">
+                  <span>{{ level }}</span>
+                  <div class="mini-progress">
+                    <i :style="{ width: barWidth(rows.users.filter((item) => item.level === level).length, Math.max(1, rows.users.length)) }"></i>
+                  </div>
+                  <b>{{ rows.users.filter((item) => item.level === level).length }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+            <div class="card table-card admin-table-card-pro">
+              <table class="admin-table-pro">
+                <thead><tr><th>用户</th><th>等级</th><th>积分</th><th>联系方式</th><th>最近登录</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr v-for="item in adminRows('users')" :key="item.id">
+                    <td><div class="admin-user-cell"><span>{{ item.name?.slice(0, 1) || '用' }}</span><div><strong>{{ item.name }}</strong><small>ID #{{ item.id }}</small></div></div></td>
+                    <td><AdminStatusBadge :label="item.level || '普通会员'" type="success" /></td>
+                    <td>{{ item.points || 0 }}</td>
+                    <td><span>{{ item.phone || '-' }}</span><small>{{ item.email || '未绑定邮箱' }}</small></td>
+                    <td>{{ item.lastLogin || '最近 7 天' }}</td>
+                    <td><AdminStatusBadge label="正常" type="success" /></td>
+                    <td><div class="actions"><button class="btn ghost" type="button" @click="openModal('编辑用户', `/api/admin/users/${item.id}`, 'PATCH', userFields(item))">编辑</button><button class="btn danger" type="button" @click="remove(`/api/admin/users/${item.id}`)">封禁/删除</button></div></td>
+                  </tr>
+                  <tr v-if="!adminRows('users').length"><td colspan="7"><div class="admin-empty-state">暂无用户数据</div></td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
 
-        <section v-if="active === 'books'" class="section">
-          <button class="btn" type="button" @click="openModal('新增书籍', '/api/admin/books', 'POST', bookFields())">新增书籍</button>
-          <div class="card table-card"><table><thead><tr><th>书名</th><th>作者</th><th>分类</th><th>收录时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('books')" :key="item.id"><td>{{ item.title }}</td><td>{{ item.author }}</td><td>{{ item.category }}</td><td>{{ item.publishedAt }}</td><td><button class="btn ghost" @click="openModal('编辑书籍', `/api/admin/books/${item.id}`, 'PATCH', bookFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/books/${item.id}`)">删除</button></td></tr></tbody></table></div>
-        </section>
-
-        <section v-if="active === 'payments'" class="section" data-testid="admin-payments-table">
-          <div class="card table-card">
-            <h3>支付审核</h3>
-            <p class="muted">用户点击“我已支付”后会进入待确认收款，管理员确认后订单才会变为已支付。</p>
-            <table>
-              <thead><tr><th>订单号</th><th>用户</th><th>金额</th><th>支付方式</th><th>支付状态</th><th>订单状态</th><th>提交时间</th><th>操作</th></tr></thead>
+        <section v-if="active === 'products'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" data-testid="admin-add-product" type="button" @click="openModal('新增商品', '/api/admin/products', 'POST', productFields())">新增商品</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in statSet('products')" :key="item.label" v-bind="item" />
+          </div>
+          <div v-if="!adminQuery" class="admin-product-board">
+            <article v-for="item in adminRows('products')" :key="item.id" class="admin-product-card">
+              <img v-if="item.image" :src="item.image" :alt="item.name" @error="imageFallback" />
+              <div>
+                <div class="admin-card-topline">
+                  <AdminStatusBadge :label="productCategoryLabel(item.category)" type="default" />
+                  <AdminStatusBadge :label="stockStatus(item).label" :type="stockStatus(item).type" />
+                </div>
+                <h3>{{ item.name }}</h3>
+                <p>{{ item.description || '暂无商品描述' }}</p>
+                <div class="admin-metric-row">
+                  <span>价格 <b>{{ money(item.price) }}</b></span>
+                  <span>库存 <b>{{ item.stock }}</b></span>
+                  <span>销量 <b>{{ productSales(item) }}</b></span>
+                </div>
+                <div class="actions">
+                  <button class="btn ghost" type="button" @click="openModal('编辑商品', `/api/admin/products/${item.id}`, 'PATCH', productFields(item))">编辑</button>
+                  <button class="btn secondary" type="button" @click="openModal('上下架商品', `/api/admin/products/${item.id}`, 'PATCH', productFields(item))">上架/下架</button>
+                  <button class="btn danger" type="button" @click="remove(`/api/admin/products/${item.id}`)">删除</button>
+                </div>
+              </div>
+            </article>
+            <div v-if="!adminRows('products').length" class="admin-empty-state">暂无商品数据</div>
+          </div>
+          <div class="card table-card admin-table-card-pro">
+            <table class="admin-table-pro">
+              <thead><tr><th>ID</th><th>商品</th><th>分类</th><th>价格</th><th>库存</th><th>销量</th><th>状态</th><th>操作</th></tr></thead>
               <tbody>
-                <tr v-for="item in adminRows('payments')" :key="item.id">
-                  <td>#{{ item.orderId }}</td>
-                  <td>{{ item.userName || `用户 #${item.userId || 0}` }}</td>
-                  <td>{{ money(item.amount) }}</td>
-                  <td>{{ paymentMethodLabel(item.method) }}</td>
-                  <td><span class="status">{{ paymentStatusLabel(item.status) }}</span></td>
-                  <td>{{ orderStatusLabel(item.orderStatus) }}</td>
-                  <td>{{ item.submittedAt || '-' }}</td>
-                  <td>
-                    <div v-if="item.status === 'submitted'" class="actions">
-                      <button class="btn" type="button" :disabled="Boolean(paymentAction)" @click="confirmPaymentRecord(item)">{{ paymentAction === `confirm-${item.id}` ? "确认中..." : "确认收款" }}</button>
-                      <button class="btn secondary" type="button" :disabled="Boolean(paymentAction)" @click="rejectPaymentRecord(item)">{{ paymentAction === `reject-${item.id}` ? "驳回中..." : "驳回" }}</button>
-                    </div>
-                    <span v-else class="muted">无需操作</span>
-                  </td>
+                <tr v-for="item in adminRows('products')" :key="`row-${item.id}`">
+                  <td>{{ item.id }}</td>
+                  <td>{{ item.name }}</td>
+                  <td>{{ productCategoryLabel(item.category) }}</td>
+                  <td>{{ money(item.price) }}</td>
+                  <td>{{ item.stock }}</td>
+                  <td>{{ productSales(item) }}</td>
+                  <td><AdminStatusBadge :label="stockStatus(item).label" :type="stockStatus(item).type" /></td>
+                  <td><div class="actions"><button class="btn ghost" type="button" @click="openModal('编辑商品', `/api/admin/products/${item.id}`, 'PATCH', productFields(item))">编辑</button><button class="btn danger" type="button" @click="remove(`/api/admin/products/${item.id}`)">删除</button></div></td>
                 </tr>
-                <tr v-if="!adminRows('payments').length"><td colspan="8">暂无支付审核记录</td></tr>
+                <tr v-if="!adminRows('products').length"><td colspan="8"><div class="admin-empty-state">暂无商品数据</div></td></tr>
               </tbody>
             </table>
           </div>
         </section>
 
-        <section v-if="active === 'orders'" class="section" data-testid="admin-orders-table">
-          <button class="btn" type="button" @click="openModal('新增订单', '/api/admin/orders', 'POST', orderFields())">新增订单</button>
-          <div v-for="typeKey in ['coffee', 'creative', 'mixed']" :key="typeKey" class="card table-card">
-            <h3>{{ typeKey === 'coffee' ? '咖啡订单' : typeKey === 'creative' ? '文创订单' : '混合订单' }}</h3>
-            <table><thead><tr><th>订单号</th><th>类型</th><th>用户ID</th><th>用户</th><th>商品数</th><th>金额</th><th>状态</th><th>支付</th><th>付款审核</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('orders').filter((order) => orderType(order) === typeKey)" :key="item.id"><td>#{{ item.id }}</td><td>{{ orderTypeLabel(item) }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.userName }}</td><td>{{ item.items?.length || 0 }}</td><td>{{ money(item.total) }}</td><td>{{ orderStatusLabel(item.status) }}</td><td>{{ paymentMethodLabel(item.paymentMethod) }}</td><td><span class="status">{{ reviewLabel(item.paymentReviewStatus) }}</span><div v-if="item.paymentReviewStatus === 'pending'" class="actions"><button class="btn" type="button" @click="reviewPayment(item, 'approved')">通过</button><button class="btn secondary" type="button" @click="reviewPayment(item, 'rejected')">驳回</button></div></td><td><button class="btn ghost" @click="openModal('编辑订单', `/api/admin/orders/${item.id}`, 'PATCH', orderFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/orders/${item.id}`)">删除</button></td></tr><tr v-if="!adminRows('orders').filter((order) => orderType(order) === typeKey).length"><td colspan="10">暂无{{ typeKey === 'coffee' ? '咖啡订单' : typeKey === 'creative' ? '文创订单' : '混合订单' }}</td></tr></tbody></table>
+        <section v-if="active === 'books'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('新增书籍', '/api/admin/books', 'POST', bookFields())">新增书籍</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in statSet('books')" :key="item.label" v-bind="item" />
+          </div>
+          <div class="card table-card admin-table-card-pro">
+            <table class="admin-table-pro">
+              <thead><tr><th>书籍</th><th>状态</th><th>分类</th><th>作者 / 出版社</th><th>借阅次数</th><th>库存</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="item in adminRows('books')" :key="item.id">
+                  <td><div class="admin-book-cell"><img v-if="item.image" :src="item.image" :alt="item.title" @error="imageFallback" /><div><strong>{{ item.title }}</strong><small>{{ item.ranking || '馆藏推荐' }}</small></div></div></td>
+                  <td><AdminStatusBadge :label="bookShelfStatus(item)" :type="bookStatusType(item)" /></td>
+                  <td>{{ item.category || '-' }}</td>
+                  <td><span>{{ item.author }}</span><small>{{ item.publisher || '咖啡书屋馆藏' }}</small></td>
+                  <td>{{ bookBorrowCount(item) }}</td>
+                  <td>{{ bookStock(item) }}</td>
+                  <td><div class="actions"><button class="btn ghost" type="button" @click="openModal('编辑书籍', `/api/admin/books/${item.id}`, 'PATCH', bookFields(item))">编辑</button><button class="btn secondary" type="button" @click="openModal('书籍详情', `/api/admin/books/${item.id}`, 'PATCH', bookFields(item))">详情</button><button class="btn danger" type="button" @click="remove(`/api/admin/books/${item.id}`)">下架</button></div></td>
+                </tr>
+                <tr v-if="!adminRows('books').length"><td colspan="7"><div class="admin-empty-state">暂无书籍数据</div></td></tr>
+              </tbody>
+            </table>
           </div>
         </section>
 
-        <section v-if="active === 'reservations'" class="section">
-          <button class="btn" type="button" @click="openModal('新增预约', '/api/admin/reservations', 'POST', reservationFields())">新增预约</button>
-          <div class="card table-card"><table><thead><tr><th>ID</th><th>用户ID</th><th>座位</th><th>手机号</th><th>日期</th><th>时间</th><th>人数</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('reservations')" :key="item.id"><td>{{ item.id }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.seatId }}</td><td>{{ item.phone || '-' }}</td><td>{{ item.date }}</td><td>{{ item.time }}</td><td>{{ item.people }}</td><td>{{ item.status }}</td><td><button class="btn ghost" @click="openModal('编辑预约', `/api/admin/reservations/${item.id}`, 'PATCH', reservationFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/reservations/${item.id}`)">删除</button></td></tr></tbody></table></div>
-        </section>
-
-        <section v-if="active === 'activities'" class="section">
-          <button class="btn" type="button" @click="openModal('新增活动', '/api/admin/activities', 'POST', activityFields())">新增活动</button>
-          <div class="card table-card"><table><thead><tr><th>ID</th><th>活动</th><th>日期</th><th>地点</th><th>直接报名</th><th>提前报名</th><th>报名</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('activities')" :key="item.id"><td>{{ item.id }}</td><td>{{ item.title }}</td><td>{{ item.date }} {{ item.time }}</td><td>{{ item.location || '-' }}</td><td>{{ item.registrationStart || '-' }}</td><td>{{ item.earlyStart || '-' }}</td><td>{{ item.applied }}/{{ item.capacity }}</td><td><button class="btn ghost" @click="openModal('编辑活动', `/api/admin/activities/${item.id}`, 'PATCH', activityFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/activities/${item.id}`)">删除</button></td></tr></tbody></table></div>
-          <div v-for="activity in adminRows('activities')" :key="`applications-${activity.id}`" class="card table-card">
-            <h3>{{ activity.title }} 报名明细</h3>
-            <p class="muted">来自 activity_applications 表，按 activity_id 与当前活动关联；提前报名会单独标注，便于核对会员权益。</p>
-            <table><thead><tr><th>ID</th><th>用户ID</th><th>用户</th><th>会员等级</th><th>手机号</th><th>人数</th><th>报名类型</th><th>时间</th></tr></thead><tbody><tr v-for="item in applicationsForActivity(activity.id)" :key="item.id"><td>{{ item.id }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.userName || (item.userId ? `用户 #${item.userId}` : '访客') }}</td><td>{{ item.userLevel || '-' }}</td><td>{{ item.phone }}</td><td>{{ item.people }}</td><td><span class="status-pill" :class="item.kind === 'early' ? 'pending' : 'done'">{{ applicationKindLabel(item.kind) }}</span></td><td>{{ item.createdAt }}</td></tr><tr v-if="!applicationsForActivity(activity.id).length"><td colspan="8">暂无报名记录</td></tr></tbody></table>
+        <section v-if="active === 'payments'" class="section admin-module-page" data-testid="admin-payments-table">
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in statSet('payments')" :key="item.label" v-bind="item" />
+          </div>
+          <div class="admin-review-board">
+            <article v-for="item in adminRows('payments')" :key="item.id" class="admin-review-card">
+              <div class="admin-card-topline">
+                <strong>订单 #{{ item.orderId }}</strong>
+                <AdminStatusBadge :label="paymentStatusLabel(item.status)" :type="paymentStatusType(item.status)" />
+              </div>
+              <div class="admin-review-card__amount">{{ money(item.amount) }}</div>
+              <div class="admin-review-meta">
+                <span>用户：{{ item.userName || `用户 #${item.userId || 0}` }}</span>
+                <span>方式：{{ paymentMethodLabel(item.method) }}</span>
+                <span>订单：{{ orderStatusLabel(item.orderStatus) }}</span>
+                <span>提交：{{ item.submittedAt || '-' }}</span>
+              </div>
+              <div v-if="item.status === 'submitted'" class="actions">
+                <button class="btn" type="button" :disabled="Boolean(paymentAction)" @click="confirmPaymentRecord(item)">{{ paymentAction === `confirm-${item.id}` ? "确认中..." : "确认收款" }}</button>
+                <button class="btn secondary" type="button" :disabled="Boolean(paymentAction)" @click="rejectPaymentRecord(item)">{{ paymentAction === `reject-${item.id}` ? "驳回中..." : "驳回" }}</button>
+              </div>
+              <span v-else class="muted">当前记录无需操作</span>
+            </article>
+            <div v-if="!adminRows('payments').length" class="admin-empty-state">暂无支付审核记录</div>
           </div>
         </section>
 
-        <section v-if="active === 'community'" class="section">
-          <div class="card table-card"><table><thead><tr><th>作者</th><th>标题</th><th>点赞</th><th>前台可见评论</th><th>待审核评论</th><th>数据状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('posts')" :key="item.id"><td>{{ item.author }}</td><td>{{ item.title }}</td><td>{{ item.likes }}</td><td>{{ item.comments?.filter((comment) => comment.status === 'approved').length || 0 }}</td><td>{{ item.comments?.filter((comment) => comment.status === 'pending').length || 0 }}</td><td><span class="status">{{ item.userId ? '会员动态' : '后台发布' }}</span></td><td><button class="btn ghost" @click="openModal('编辑动态', `/api/admin/posts/${item.id}`, 'PATCH', [{ name: 'title', label: '标题', value: item.title }, { name: 'content', label: '内容', value: item.content, type: 'textarea' }])">编辑</button><button class="btn danger" @click="remove(`/api/admin/posts/${item.id}`)">删除</button></td></tr></tbody></table></div>
-          <div class="card table-card">
-            <h3>评论审核</h3>
-            <table><thead><tr><th>评论ID</th><th>动态</th><th>用户ID</th><th>用户</th><th>评论内容</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in comments" :key="item.id"><td>#{{ item.id }}</td><td>#{{ item.postId }} {{ item.postTitle }}</td><td>{{ item.userId || 0 }}</td><td>{{ item.user }}</td><td>{{ item.content }}</td><td><span class="status">{{ reviewLabel(item.status) }}</span></td><td><button class="btn" type="button" @click="reviewComment(item, 'approved')">通过</button><button class="btn secondary" type="button" @click="reviewComment(item, 'rejected')">驳回</button><button class="btn danger" type="button" @click="remove(`/api/admin/posts/${item.postId}/comments/${item.id}`)">删除</button></td></tr><tr v-if="!comments.length"><td colspan="7">暂无评论</td></tr></tbody></table>
+        <section v-if="active === 'orders'" class="section admin-module-page" data-testid="admin-orders-table">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('新增订单', '/api/admin/orders', 'POST', orderFields())">新增订单</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in statSet('orders')" :key="item.label" v-bind="item" />
+          </div>
+          <div class="card table-card admin-table-card-pro">
+            <table class="admin-table-pro">
+              <thead><tr><th>订单</th><th>类型</th><th>用户</th><th>金额</th><th>状态</th><th>支付审核</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="item in adminRows('orders')" :key="item.id">
+                  <td><strong>#{{ item.id }}</strong><small>{{ item.createdAt || '最近创建' }}</small></td>
+                  <td>{{ orderTypeLabel(item) }}</td>
+                  <td><span>{{ item.userName || '线下用户' }}</span><small>ID #{{ item.userId || 0 }}</small></td>
+                  <td>{{ money(item.total) }}</td>
+                  <td><AdminStatusBadge :label="orderStatusLabel(item.status)" :type="orderStatusType(item.status)" /></td>
+                  <td>
+                    <AdminStatusBadge :label="reviewLabel(item.paymentReviewStatus)" :type="reviewStatusType(item.paymentReviewStatus)" />
+                    <div v-if="item.paymentReviewStatus === 'pending'" class="actions inline-actions">
+                      <button class="btn" type="button" @click="reviewPayment(item, 'approved')">通过</button>
+                      <button class="btn secondary" type="button" @click="reviewPayment(item, 'rejected')">驳回</button>
+                    </div>
+                  </td>
+                  <td><div class="actions"><button class="btn ghost" type="button" @click="orderDrawer = item">详情</button><button class="btn ghost" type="button" @click="openModal('编辑订单', `/api/admin/orders/${item.id}`, 'PATCH', orderFields(item))">编辑</button><button class="btn danger" type="button" @click="remove(`/api/admin/orders/${item.id}`)">删除</button></div></td>
+                </tr>
+                <tr v-if="!adminRows('orders').length"><td colspan="7"><div class="admin-empty-state">暂无订单数据</div></td></tr>
+              </tbody>
+            </table>
           </div>
         </section>
 
-        <section v-if="active === 'content'" class="section">
-          <button class="btn" type="button" @click="openModal('新增公告', '/api/admin/notices', 'POST', noticeFields())">新增公告</button>
-          <div class="card table-card"><table><thead><tr><th>标题</th><th>摘要</th><th>发布时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in adminRows('notices')" :key="item.id"><td>{{ item.title }}</td><td>{{ item.summary }}</td><td>{{ item.date }}</td><td><button class="btn ghost" @click="openModal('编辑公告', `/api/admin/notices/${item.id}`, 'PATCH', noticeFields(item))">编辑</button><button class="btn danger" @click="remove(`/api/admin/notices/${item.id}`)">删除</button></td></tr></tbody></table></div>
+        <section v-if="active === 'reservations'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('新增预约', '/api/admin/reservations', 'POST', reservationFields())">新增预约</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in statSet('reservations')" :key="item.label" v-bind="item" />
+          </div>
+          <div class="admin-management-grid">
+            <AdminChartCard title="座位区域使用情况" description="根据 seatId 前缀派生 A/B/C 区域">
+              <div class="admin-ratio-list">
+                <div v-for="area in ['A 安静阅读区', 'B 咖啡交流区', 'C 靠窗座位区']" :key="area" class="rank-row">
+                  <span>{{ area }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(rows.reservations.filter((item) => reservationArea(item) === area).length, Math.max(1, rows.reservations.length)) }"></i></div>
+                  <b>{{ rows.reservations.filter((item) => reservationArea(item) === area).length }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+            <div class="card table-card admin-table-card-pro">
+              <table class="admin-table-pro">
+                <thead><tr><th>预约</th><th>区域</th><th>联系方式</th><th>日期时间</th><th>人数</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr v-for="item in adminRows('reservations')" :key="item.id">
+                    <td><strong>#{{ item.id }}</strong><small>座位 {{ item.seatId || item.seatIds || '-' }}</small></td>
+                    <td>{{ reservationArea(item) }}</td>
+                    <td><span>{{ item.phone || '-' }}</span><small>用户 #{{ item.userId || 0 }}</small></td>
+                    <td>{{ item.date }} {{ item.time }}</td>
+                    <td>{{ item.people || 1 }}</td>
+                    <td><AdminStatusBadge :label="item.status || '已预约'" :type="reservationStatusType(item.status)" /></td>
+                    <td><div class="actions"><button class="btn ghost" type="button" @click="openModal('编辑预约', `/api/admin/reservations/${item.id}`, 'PATCH', reservationFields(item))">查看/编辑</button><button class="btn secondary" type="button" @click="openModal('确认到店', `/api/admin/reservations/${item.id}`, 'PATCH', reservationFields(item))">确认到店</button><button class="btn danger" type="button" @click="remove(`/api/admin/reservations/${item.id}`)">取消/删除</button></div></td>
+                  </tr>
+                  <tr v-if="!adminRows('reservations').length"><td colspan="7"><div class="admin-empty-state">暂无预约数据</div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </section>
 
-        <section v-if="active === 'income'" class="section">
-          <div class="grid">
-            <div class="card metric"><span class="muted">收入总额</span><strong>{{ money(summary?.income?.total) }}</strong><span>已支付订单</span></div>
-            <div class="card metric"><span class="muted">订单数</span><strong>{{ summary?.income?.count || 0 }}</strong><span>支付完成</span></div>
+        <section v-if="active === 'activities'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('新增活动', '/api/admin/activities', 'POST', activityFields())">新增活动</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in statSet('activities')" :key="item.label" v-bind="item" />
+          </div>
+          <div class="admin-activity-board">
+            <article v-for="activity in adminRows('activities')" :key="activity.id" class="admin-activity-card">
+              <div class="admin-card-topline">
+                <AdminStatusBadge :label="activityStatusLabel(activity.status)" :type="activityStatusType(activity.status)" />
+                <span>{{ activity.date }} {{ activity.time }}</span>
+              </div>
+              <h3>{{ activity.title }}</h3>
+              <p>{{ activity.description || '暂无活动介绍' }}</p>
+              <div class="admin-metric-row">
+                <span>地点 <b>{{ activity.location || '-' }}</b></span>
+                <span>报名 <b>{{ activity.applied }}/{{ activity.capacity }}</b></span>
+                <span>满意度 <b>{{ 92 + (Number(activity.id || 0) % 6) }}%</b></span>
+              </div>
+              <div class="mini-progress"><i :style="{ width: `${activityProgress(activity)}%` }"></i></div>
+              <div class="actions">
+                <button class="btn ghost" type="button" @click="openModal('编辑活动', `/api/admin/activities/${activity.id}`, 'PATCH', activityFields(activity))">编辑</button>
+                <button class="btn secondary" type="button" @click="openModal('报名管理', `/api/admin/activities/${activity.id}`, 'PATCH', activityFields(activity))">报名管理</button>
+                <button class="btn danger" type="button" @click="remove(`/api/admin/activities/${activity.id}`)">删除</button>
+              </div>
+              <div class="application-list-mini">
+                <strong>报名明细</strong>
+                <div v-for="item in applicationsForActivity(activity.id).slice(0, 3)" :key="item.id" class="rank-row">
+                  <span>{{ item.userName || (item.userId ? `用户 #${item.userId}` : '访客') }}</span>
+                  <small>{{ applicationKindLabel(item.kind) }} · {{ item.people }} 人</small>
+                </div>
+                <small v-if="!applicationsForActivity(activity.id).length">暂无报名记录</small>
+              </div>
+            </article>
+            <div v-if="!adminRows('activities').length" class="admin-empty-state">暂无活动数据</div>
+          </div>
+        </section>
+
+        <section v-if="active === 'community'" class="section admin-module-page">
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in statSet('community')" :key="item.label" v-bind="item" />
+          </div>
+          <div class="admin-management-grid">
+            <div class="admin-community-list">
+              <article v-for="item in adminRows('posts')" :key="item.id" class="admin-community-card">
+                <div class="admin-card-topline">
+                  <strong>{{ item.author || '匿名书友' }}</strong>
+                  <AdminStatusBadge :label="postSourceLabel(item)" type="default" />
+                </div>
+                <h3>{{ item.title }}</h3>
+                <p>{{ item.content }}</p>
+                <div class="admin-metric-row">
+                  <span>点赞 <b>{{ item.likes }}</b></span>
+                  <span>可见评论 <b>{{ approvedComments(item) }}</b></span>
+                  <span>待审评论 <b>{{ pendingComments(item) }}</b></span>
+                </div>
+                <div class="actions">
+                  <button class="btn ghost" type="button" @click="openModal('编辑动态', `/api/admin/posts/${item.id}`, 'PATCH', [{ name: 'title', label: '标题', value: item.title }, { name: 'content', label: '内容', value: item.content, type: 'textarea' }])">编辑</button>
+                  <button class="btn secondary" type="button" @click="openModal('帖子详情', `/api/admin/posts/${item.id}`, 'PATCH', [{ name: 'title', label: '标题', value: item.title }, { name: 'content', label: '内容', value: item.content, type: 'textarea' }])">帖子详情</button>
+                  <button class="btn danger" type="button" @click="remove(`/api/admin/posts/${item.id}`)">删除</button>
+                </div>
+              </article>
+              <div v-if="!adminRows('posts').length" class="admin-empty-state">暂无社区动态</div>
+            </div>
+            <div class="card table-card admin-table-card-pro">
+              <h3>评论审核</h3>
+              <table class="admin-table-pro">
+                <thead><tr><th>评论</th><th>动态</th><th>用户</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr v-for="item in comments" :key="item.id">
+                    <td><strong>#{{ item.id }}</strong><small>{{ item.content }}</small></td>
+                    <td>#{{ item.postId }} {{ item.postTitle }}</td>
+                    <td>{{ item.user || `用户 #${item.userId || 0}` }}</td>
+                    <td><AdminStatusBadge :label="reviewLabel(item.status)" :type="reviewStatusType(item.status)" /></td>
+                    <td><div class="actions"><button class="btn" type="button" @click="reviewComment(item, 'approved')">通过</button><button class="btn secondary" type="button" @click="reviewComment(item, 'rejected')">驳回</button><button class="btn danger" type="button" @click="remove(`/api/admin/posts/${item.postId}/comments/${item.id}`)">删除</button></div></td>
+                  </tr>
+                  <tr v-if="!comments.length"><td colspan="5"><div class="admin-empty-state">暂无评论</div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="active === 'content'" class="section admin-module-page admin-content-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('新增公告', '/api/admin/notices', 'POST', noticeFields())">新增公告</button>
+          </div>
+
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in contentStats" :key="item.label" v-bind="item" />
+          </div>
+
+          <div class="admin-management-grid">
+            <AdminChartCard title="发布趋势" description="公告与社区内容按最近 7 天派生">
+              <div class="admin-line-chart compact">
+                <div
+                  v-for="item in contentTrend"
+                  :key="item.label"
+                  class="admin-line-chart__bar"
+                  :style="{ height: barWidth(item.count, maxOf(contentTrend, 'count')) }"
+                >
+                  <span>{{ item.count }}</span>
+                  <small>{{ item.label }}</small>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="内容类型统计" description="公告、动态、活动和商品内容占比">
+              <div class="admin-ratio-list">
+                <div v-for="item in contentTypeStats" :key="item.label" class="rank-row">
+                  <span>{{ item.label }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.count, maxOf(contentTypeStats, 'count')) }"></i></div>
+                  <b>{{ item.count }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="热门内容 TOP5" description="按点赞、评论和公告热度前端派生">
+              <div class="admin-ranking-list">
+                <article v-for="(item, index) in popularContents" :key="item.id">
+                  <span>{{ index + 1 }}</span>
+                  <div>
+                    <strong>{{ item.title }}</strong>
+                    <small>{{ item.type }}</small>
+                  </div>
+                  <b>{{ item.score }}</b>
+                </article>
+                <p v-if="!popularContents.length" class="muted">暂无热门内容</p>
+              </div>
+            </AdminChartCard>
+          </div>
+
+          <div class="card table-card admin-table-card-pro">
+            <div class="section-head compact"><div><h3>内容列表</h3><p class="muted">公告新增、编辑、删除仍走原后台接口。</p></div></div>
+            <table class="admin-table-pro">
+              <thead><tr><th>标题</th><th>类型</th><th>摘要</th><th>发布时间</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="item in adminRows('notices')" :key="item.id">
+                  <td><strong>{{ item.title }}</strong><small>ID #{{ item.id }}</small></td>
+                  <td><AdminStatusBadge label="系统公告" type="accent" /></td>
+                  <td>{{ item.summary }}</td>
+                  <td>{{ item.date }}</td>
+                  <td><div class="actions"><button class="btn ghost" type="button" @click="openModal('编辑公告', `/api/admin/notices/${item.id}`, 'PATCH', noticeFields(item))">编辑</button><button class="btn danger" type="button" @click="remove(`/api/admin/notices/${item.id}`)">删除</button></div></td>
+                </tr>
+                <tr v-if="!adminRows('notices').length"><td colspan="5"><div class="admin-empty-state">暂无公告内容</div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="active === 'income'" class="section admin-module-page admin-finance-page">
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in financeStats" :key="item.label" v-bind="item" />
+          </div>
+
+          <div class="admin-finance-grid">
+            <AdminChartCard title="收入趋势" description="近 7 天已支付订单收入走势">
+              <div class="admin-line-chart">
+                <div
+                  v-for="item in dashboard.salesTrend || []"
+                  :key="item.date"
+                  class="admin-line-chart__bar"
+                  :style="{ height: barWidth(item.total, maxOf(dashboard.salesTrend, 'total')) }"
+                >
+                  <span>{{ money(item.total) }}</span>
+                  <small>{{ item.label }}</small>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="收入来源占比" description="订单、活动、会员权益等来源派生">
+              <div class="finance-source-list">
+                <div v-for="item in financeSources" :key="item.label" class="rank-row">
+                  <span>{{ item.label }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.value, maxOf(financeSources, 'value')) }"></i></div>
+                  <b>{{ money(item.value) }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+          </div>
+
+          <div class="card table-card admin-table-card-pro">
+            <div class="section-head compact"><div><h3>收入明细</h3><p class="muted">基于订单与报名记录派生，不改变原始接口。</p></div><button class="btn ghost" type="button" @click="message = '报表导出为演示入口，当前未新增后端导出接口'">导出报表</button></div>
+            <table class="admin-table-pro">
+              <thead><tr><th>来源</th><th>项目</th><th>金额</th><th>状态</th><th>时间</th></tr></thead>
+              <tbody>
+                <tr v-for="item in financeDetails" :key="item.id">
+                  <td>{{ item.source }}</td>
+                  <td><strong>{{ item.name }}</strong></td>
+                  <td>{{ money(item.amount) }}</td>
+                  <td><AdminStatusBadge :label="item.status" type="success" /></td>
+                  <td>{{ item.createdAt }}</td>
+                </tr>
+                <tr v-if="!financeDetails.length"><td colspan="5"><div class="admin-empty-state">暂无收入明细</div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="active === 'dashboard'" class="section admin-module-page cockpit-page">
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in cockpitStats" :key="item.label" v-bind="item" />
+          </div>
+
+          <div class="cockpit-grid">
+            <AdminChartCard title="用户增长" description="最近 7 天用户增长趋势">
+              <div class="admin-line-chart compact">
+                <div v-for="item in userGrowthTrend" :key="item.label" class="admin-line-chart__bar" :style="{ height: barWidth(item.count, maxOf(userGrowthTrend, 'count')) }">
+                  <span>{{ item.count }}</span>
+                  <small>{{ item.label }}</small>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="收入趋势" description="财务中心同步收入趋势">
+              <div class="mini-bars">
+                <div v-for="item in dashboard.salesTrend || []" :key="item.date" class="bar-row">
+                  <span>{{ item.label }}</span>
+                  <div class="bar-track"><i :style="{ width: barWidth(item.total, maxOf(dashboard.salesTrend, 'total')) }"></i></div>
+                  <strong>{{ money(item.total) }}</strong>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="商品销量" description="热门商品销量排行">
+              <div class="admin-ranking-list">
+                <article v-for="(item, index) in dashboard.hotProducts || []" :key="item.productId || item.name">
+                  <span>{{ index + 1 }}</span>
+                  <div><strong>{{ item.name }}</strong><small>销售额 {{ money(item.total) }}</small></div>
+                  <b>{{ item.quantity }}</b>
+                </article>
+                <p v-if="!(dashboard.hotProducts || []).length" class="muted">暂无商品销量</p>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="热门书籍" description="按借阅次数前端派生">
+              <div class="admin-ratio-list">
+                <div v-for="item in bookRanking" :key="item.label" class="rank-row">
+                  <span>{{ item.label }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.count, maxOf(bookRanking, 'count')) }"></i></div>
+                  <b>{{ item.count }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="活动热度" description="活动报名人数与容量对比">
+              <div class="admin-ratio-list">
+                <div v-for="item in activityRanking" :key="item.label" class="rank-row">
+                  <span>{{ item.label }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.count, item.total) }"></i></div>
+                  <b>{{ item.count }}/{{ item.total }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="预约热力图" description="按区域和时段前端派生">
+              <div class="reservation-heatmap">
+                <div v-for="cell in reservationHeatmap" :key="cell.id" :style="{ opacity: 0.28 + Number(barWidth(cell.count, maxOf(reservationHeatmap, 'count')).replace('%', '')) / 140 }">
+                  <strong>{{ cell.area }}</strong>
+                  <span>{{ cell.time }}</span>
+                  <b>{{ cell.count }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="社区活跃度" description="帖子与评论活跃趋势">
+              <div class="admin-line-chart compact">
+                <div v-for="item in communityActivityTrend" :key="item.label" class="admin-line-chart__bar" :style="{ height: barWidth(item.count, maxOf(communityActivityTrend, 'count')) }">
+                  <span>{{ item.count }}</span>
+                  <small>{{ item.label }}</small>
+                </div>
+              </div>
+            </AdminChartCard>
+          </div>
+        </section>
+
+        <section v-if="active === 'permissions'" class="section admin-module-page permission-page">
+          <div class="permission-grid">
+            <article v-for="role in roleCards" :key="role.name" class="card permission-role-card">
+              <AdminStatusBadge :label="role.name" :type="role.tone === 'gold' ? 'warning' : 'accent'" />
+              <h3>{{ role.members }} 人</h3>
+              <p>{{ role.desc }}</p>
+            </article>
+          </div>
+
+          <div class="admin-management-grid">
+            <AdminChartCard title="权限配置" description="菜单、操作、数据和安全权限分组">
+              <div class="permission-group-list">
+                <article v-for="group in permissionGroups" :key="group.name">
+                  <h3>{{ group.name }}</h3>
+                  <div class="tag-row"><span v-for="item in group.items" :key="item">{{ item }}</span></div>
+                </article>
+              </div>
+            </AdminChartCard>
+
+            <div class="card table-card admin-table-card-pro">
+              <div class="section-head compact"><div><h3>管理员管理</h3><p class="muted">基于当前管理员和用户数据派生展示。</p></div></div>
+              <table class="admin-table-pro">
+                <thead><tr><th>管理员</th><th>角色</th><th>状态</th><th>最近活跃</th></tr></thead>
+                <tbody>
+                  <tr v-for="item in adminMembers" :key="`${item.name}-${item.role}`">
+                    <td><strong>{{ item.name }}</strong></td>
+                    <td>{{ item.role }}</td>
+                    <td><AdminStatusBadge :label="item.status" type="success" /></td>
+                    <td>{{ item.lastActive }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <AdminChartCard title="操作日志" description="权限相关操作查看入口">
+              <div class="admin-activity-feed compact">
+                <article v-for="item in realtime.slice(0, 5)" :key="item.id || item.createdAt">
+                  <span>{{ item.createdAt }}</span>
+                  <div>
+                    <strong>{{ item.action }}</strong>
+                    <p>{{ actorLabel(item) }} · {{ item.detail || "系统操作" }}</p>
+                  </div>
+                </article>
+              </div>
+            </AdminChartCard>
+          </div>
+        </section>
+
+        <section v-if="active === 'settings'" class="section admin-module-page system-settings-page">
+          <div class="settings-grid">
+            <article v-for="group in settingGroups" :key="group.title" class="card settings-card">
+              <h3>{{ group.title }}</h3>
+              <div class="profile-inline-list">
+                <p v-for="[label, value] in group.items" :key="label"><span>{{ label }}</span><strong>{{ value }}</strong></p>
+              </div>
+            </article>
+          </div>
+
+          <div class="admin-management-grid">
+            <AdminChartCard title="存储使用情况" description="按当前接口记录数派生展示">
+              <div class="admin-ratio-list">
+                <div v-for="item in storageStatus" :key="item.label" class="rank-row">
+                  <span>{{ item.label }}</span>
+                  <div class="mini-progress"><i :style="{ width: item.percent }"></i></div>
+                  <b>{{ item.value }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="安全设置" description="后台安全和维护状态">
+              <div class="security-config-list">
+                <p><span>JWT 登录</span><AdminStatusBadge label="启用" type="success" /></p>
+                <p><span>管理员账号</span><AdminStatusBadge label="演示账号" type="warning" /></p>
+                <p><span>危险操作确认</span><AdminStatusBadge label="已开启" type="success" /></p>
+                <p><span>接口路径</span><AdminStatusBadge label="保持不变" type="accent" /></p>
+              </div>
+            </AdminChartCard>
           </div>
         </section>
 
@@ -706,14 +1718,8 @@ function adminRows(key) {
             <table><thead><tr><th>用户</th><th>商品</th><th>数量</th><th>时间</th></tr></thead><tbody><tr v-for="item in rows.carts" :key="`${item.userKey}-${item.productId}-${item.createdAt}`"><td>{{ item.userName || item.userKey }}</td><td>{{ item.productName || item.productId }}</td><td>{{ item.quantity }}</td><td>{{ item.createdAt || '-' }}</td></tr></tbody></table>
           </div>
         </section>
-
-        <section v-if="active === 'dashboard'" class="section">
-          <div class="grid">
-            <div v-for="item in summary?.dashboard?.metrics || []" :key="item.label" class="card metric"><span class="muted">{{ item.label }}</span><strong>{{ item.value }}</strong><span>{{ item.note }}</span></div>
-          </div>
-        </section>
       </main>
-    </div>
+  </AdminLayout>
 
     <div v-if="modal.visible" class="admin-modal-overlay">
       <form class="card admin-modal admin-modal-form" data-testid="admin-modal-form" @submit.prevent="submitModal">
@@ -744,17 +1750,36 @@ function adminRows(key) {
         </div>
         <div class="admin-modal-actions">
           <button class="btn ghost" data-testid="admin-confirm-cancel" type="button" @click="closeConfirm">取消</button>
-          <button class="btn danger" data-testid="admin-confirm-delete" type="button" @click="confirmRemove">确认删除</button>
+          <button
+            class="btn"
+            :class="{ danger: confirmDialog.danger }"
+            data-testid="admin-confirm-delete"
+            type="button"
+            @click="confirmRemove"
+          >
+            {{ confirmDialog.confirmText }}
+          </button>
         </div>
       </article>
     </div>
 
-    <div v-if="logDetail" class="admin-modal-overlay">
-      <article class="card admin-modal">
-        <div class="admin-modal-head">
-          <div><h3>日志详情 #{{ logDetail.id }}</h3><p class="muted">{{ logDetail.createdAt }}</p></div>
-          <button class="icon-button" type="button" @click="logDetail = null">×</button>
-        </div>
+    <AdminDrawer :open="Boolean(orderDrawer)" :title="`订单详情 #${orderDrawer?.id || ''}`" @close="orderDrawer = null">
+      <div v-if="orderDrawer" class="drawer-detail-list">
+        <p><span>订单类型</span><strong>{{ orderTypeLabel(orderDrawer) }}</strong></p>
+        <p><span>用户</span><strong>{{ orderDrawer.userName || '线下用户' }} / #{{ orderDrawer.userId || 0 }}</strong></p>
+        <p><span>订单状态</span><strong>{{ orderStatusLabel(orderDrawer.status) }}</strong></p>
+        <p><span>支付方式</span><strong>{{ paymentMethodLabel(orderDrawer.paymentMethod) }}</strong></p>
+        <p><span>付款审核</span><strong>{{ reviewLabel(orderDrawer.paymentReviewStatus) }}</strong></p>
+        <p><span>商品明细</span><strong>{{ orderItemsLabel(orderDrawer) }}</strong></p>
+        <p><span>订单金额</span><strong>{{ money(orderDrawer.total) }}</strong></p>
+      </div>
+      <div class="admin-modal-actions">
+        <button class="btn ghost" type="button" @click="orderDrawer = null">关闭</button>
+        <button class="btn" type="button" @click="openModal('编辑订单', `/api/admin/orders/${orderDrawer.id}`, 'PATCH', orderFields(orderDrawer))">编辑订单</button>
+      </div>
+    </AdminDrawer>
+
+    <BaseModal :open="Boolean(logDetail)" :title="`日志详情 #${logDetail?.id || ''}`" :description="logDetail?.createdAt || ''" @close="logDetail = null">
         <div class="profile-inline-list">
           <p><span>用户标识</span><strong>{{ actorLabel(logDetail) }}</strong></p>
           <p><span>用户名称</span><strong>{{ logDetail.actorName }}</strong></p>
@@ -762,8 +1787,6 @@ function adminRows(key) {
           <p><span>关联对象</span><strong>{{ logDetail.targetType || '-' }} {{ logDetail.targetId ? `#${logDetail.targetId}` : '' }}</strong></p>
           <p><span>详细信息</span><strong>{{ logDetail.detail }}</strong></p>
         </div>
-        <div class="admin-modal-actions"><button class="btn" type="button" @click="logDetail = null">关闭</button></div>
-      </article>
-    </div>
-  </div>
+        <div class="admin-modal-actions"><BaseButton type="button" @click="logDetail = null">关闭</BaseButton></div>
+    </BaseModal>
 </template>

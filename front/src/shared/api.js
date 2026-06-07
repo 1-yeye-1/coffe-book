@@ -25,6 +25,6 @@ export async function request(path, options = {}) {
     throw new Error("后端返回格式异常，请检查接口服务");
   }
 
-  if (!body.success) throw new Error(body.message || "请求失败");
+  if (!(body.success === true || body.code === 200)) throw new Error(body.msg || body.message || "请求失败");
   return body.data;
 }

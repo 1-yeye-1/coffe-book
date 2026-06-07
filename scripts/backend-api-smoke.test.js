@@ -12,6 +12,7 @@ const env = {
   ...process.env,
   PORT: String(PORT),
   NODE_ENV: "development",
+  COFFEE_BOOK_MEMORY_DB: process.env.COFFEE_BOOK_MEMORY_DB || "1",
   JWT_SECRET: process.env.JWT_SECRET || "coffee-book-test-secret-at-least-32-characters"
 };
 if (env.Path && env.PATH) delete env.Path;
@@ -111,12 +112,17 @@ async function step(name, fn) {
 
 async function sendSms(phone) {
   const slider = await request("/api/auth/slider");
+  const sliderStartedAt = Date.now();
+  await delay(320);
+  const sliderEndedAt = Date.now();
   await request("/api/auth/sms-code", {
     method: "POST",
     body: {
       phone,
       sliderToken: slider.token,
-      sliderValue: slider.target
+      sliderValue: slider.target,
+      sliderStartedAt,
+      sliderEndedAt
     }
   });
   return waitForSms(phone);
@@ -161,6 +167,18 @@ async function main() {
   });
 
   await step("admin api rejects missing token", () => expectRejected("/api/admin/summary", {}, 401));
+
+  await step("slider rejects missing timing", async () => {
+    const slider = await request("/api/auth/slider");
+    return expectRejected("/api/auth/sms-code", {
+      method: "POST",
+      body: {
+        phone: "13800000000",
+        sliderToken: slider.token,
+        sliderValue: slider.target
+      }
+    }, 400);
+  });
 
   const testProduct = await step("admin product management", async () => {
     const product = await request("/api/admin/products", {
@@ -256,6 +274,18 @@ async function main() {
     body: { productId: testProduct.id, quantity: 2 }
   }));
 
+  await step("cart listing and quantity update", async () => {
+    const cart = await request("/api/cart", { token });
+    if (!cart.some((item) => item.productId === testProduct.id && item.quantity === 2)) throw new Error("cart item was not listed");
+    const updated = await request(`/api/cart/${testProduct.id}`, {
+      method: "PATCH",
+      token,
+      body: { quantity: 2 }
+    });
+    if (!updated.some((item) => item.productId === testProduct.id && item.quantity === 2)) throw new Error("cart quantity was not updated");
+    return updated;
+  });
+
   const order = await step("create order", () => request("/api/orders", {
     method: "POST",
     token,
@@ -263,18 +293,41 @@ async function main() {
   }));
   created.orderId = order.id;
 
+  await step("order list and detail", async () => {
+    const orders = await request("/api/orders", { token });
+    if (!orders.some((item) => item.id === order.id)) throw new Error("created order is missing from order list");
+    const detail = await request(`/api/orders/${order.id}`, { token });
+    if (detail.id !== order.id) throw new Error("order detail returned the wrong order");
+    return detail;
+  });
+
   await step("order ownership guard", () => expectRejected(`/api/orders/${order.id}/payment-status`, { token: demoSession.token }, 403));
 
-  await step("payment submit", () => request(`/api/orders/${order.id}/pay`, {
+  const payment = await step("payment create", () => request("/api/payments/create", {
     method: "POST",
     token,
-    body: { paymentMethod: "smoke-test" }
+    body: { orderId: order.id, method: "mock" }
+  }));
+  created.paymentId = payment.paymentId;
+
+  await step("payment submit", () => request("/api/payments/submit", {
+    method: "POST",
+    token,
+    body: { paymentId: payment.paymentId }
   }));
 
-  await step("admin order management", () => request(`/api/admin/orders/${order.id}/payment-review`, {
-    method: "PATCH",
+  await step("admin payment list", async () => {
+    const records = await request("/api/admin/payments?status=all", { token: adminToken });
+    if (!records.some((item) => item.id === payment.paymentId && item.status === "submitted")) {
+      throw new Error("submitted payment not found in admin review list");
+    }
+    return records;
+  });
+
+  await step("admin payment confirm", () => request(`/api/admin/payments/${payment.paymentId}/confirm`, {
+    method: "POST",
     token: adminToken,
-    body: { status: "approved" }
+    body: {}
   }));
 
   const reservationDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);

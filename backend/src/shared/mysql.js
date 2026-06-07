@@ -166,6 +166,7 @@ async function createTables() {
       registration_start DATETIME NULL,
       early_start DATETIME NULL,
       location VARCHAR(160) NOT NULL DEFAULT '',
+      status VARCHAR(20) NOT NULL DEFAULT 'open',
       description TEXT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS activity_applications (
@@ -306,10 +307,11 @@ async function ensureActivityColumns() {
     "ADD COLUMN registration_start DATETIME NULL",
     "ADD COLUMN early_start DATETIME NULL",
     "ADD COLUMN location VARCHAR(160) NOT NULL DEFAULT ''",
+    "ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'open'",
     "ADD COLUMN description TEXT NULL",
     "ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'regular'"
   ];
-  for (const column of columns.slice(0, 5)) {
+  for (const column of columns.slice(0, 6)) {
     try {
       await pool.query(`ALTER TABLE activities ${column}`);
     } catch (error) {
@@ -317,7 +319,7 @@ async function ensureActivityColumns() {
     }
   }
   try {
-    await pool.query(`ALTER TABLE activity_applications ${columns[5]}`);
+    await pool.query(`ALTER TABLE activity_applications ${columns[6]}`);
   } catch (error) {
     if (error.code !== "ER_DUP_FIELDNAME") throw error;
   }
@@ -433,10 +435,10 @@ async function seedTables() {
     for (const reservation of db.reservations) await persistReservation(reservation);
   }
   for (const activity of db.activities) await pool.execute(
-    `INSERT INTO activities (id, title, capacity, applied, date, time, registration_start, early_start, location, description)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE time=IF(time='', VALUES(time), time), registration_start=COALESCE(registration_start, VALUES(registration_start)), early_start=COALESCE(early_start, VALUES(early_start)), location=IF(location='', VALUES(location), location), description=IF(description IS NULL OR description='', VALUES(description), description)`,
-    [activity.id, activity.title, activity.capacity, activity.applied, activity.date, activity.time || "", activity.registrationStart || null, activity.earlyStart || null, activity.location || "", activity.description || ""]
+    `INSERT INTO activities (id, title, capacity, applied, date, time, registration_start, early_start, location, status, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE time=IF(time='', VALUES(time), time), registration_start=COALESCE(registration_start, VALUES(registration_start)), early_start=COALESCE(early_start, VALUES(early_start)), location=IF(location='', VALUES(location), location), status=IF(status='', VALUES(status), status), description=IF(description IS NULL OR description='', VALUES(description), description)`,
+    [activity.id, activity.title, activity.capacity, activity.applied, activity.date, activity.time || "", activity.registrationStart || null, activity.earlyStart || null, activity.location || "", activity.status || "open", activity.description || ""]
   );
   if (await countRows("posts") === 0) {
     for (const post of db.posts) {
@@ -580,6 +582,7 @@ async function loadTables() {
     registrationStart: formatDateTime(item.registration_start),
     earlyStart: formatDateTime(item.early_start),
     location: item.location || "",
+    status: item.status || "open",
     description: item.description || ""
   }));
   db.activityApplications = activityApplications.map((item) => ({
@@ -811,10 +814,10 @@ async function persistPayment(payment) {
 async function persistActivity(activity) {
   if (!pool) return;
   await pool.execute(
-    `INSERT INTO activities (id, title, capacity, applied, date, time, registration_start, early_start, location, description)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE title=VALUES(title), capacity=VALUES(capacity), applied=VALUES(applied), date=VALUES(date), time=VALUES(time), registration_start=VALUES(registration_start), early_start=VALUES(early_start), location=VALUES(location), description=VALUES(description)`,
-    [activity.id, activity.title, activity.capacity, activity.applied, activity.date, activity.time || "", activity.registrationStart || null, activity.earlyStart || null, activity.location || "", activity.description || ""]
+    `INSERT INTO activities (id, title, capacity, applied, date, time, registration_start, early_start, location, status, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE title=VALUES(title), capacity=VALUES(capacity), applied=VALUES(applied), date=VALUES(date), time=VALUES(time), registration_start=VALUES(registration_start), early_start=VALUES(early_start), location=VALUES(location), status=VALUES(status), description=VALUES(description)`,
+    [activity.id, activity.title, activity.capacity, activity.applied, activity.date, activity.time || "", activity.registrationStart || null, activity.earlyStart || null, activity.location || "", activity.status || "open", activity.description || ""]
   );
 }
 
@@ -891,6 +894,17 @@ async function persistCartItem(userKey, productId, quantity) {
   );
 }
 
+async function persistUserCart(userKey, items = []) {
+  if (!pool) return;
+  await pool.execute("DELETE FROM carts WHERE user_key=?", [String(userKey)]);
+  for (const item of items) {
+    await pool.execute(
+      "INSERT INTO carts (user_key, product_id, quantity, created_at) VALUES (?, ?, ?, NOW())",
+      [String(userKey), item.productId, item.quantity]
+    );
+  }
+}
+
 async function deleteUser(id) {
   if (!pool) return;
   await pool.execute("DELETE FROM users WHERE id=?", [id]);
@@ -948,6 +962,7 @@ module.exports = {
   persistActivityApplication,
   persistAdmin,
   persistCartItem,
+  persistUserCart,
   persistAuditLog,
   persistComment,
   persistOrder,

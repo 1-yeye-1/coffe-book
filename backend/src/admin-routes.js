@@ -25,6 +25,8 @@ const {
   persistUser
 } = require("./shared/mysql");
 const { adminSummary } = require("./modules/admin-summary");
+const { findSeatConflicts } = require("./modules/reservations");
+const { restoreOrderStock } = require("./modules/orders");
 const {
   adminPaymentRows,
   confirmOrderPayment,
@@ -34,11 +36,15 @@ const {
   rejectPayment
 } = require("./modules/payments");
 const { auditActivity } = require("./shared/audit");
-const { nextId, validBirthday, validEmail, validNonNegativeInteger, validNonNegativeNumber, validPeople, validPhone } = require("./shared/validators");
+const { nextId, validBirthday, validDateString, validEmail, validEnum, validNonNegativeInteger, validNonNegativeNumber, validPeople, validPhone, validTextLength, validTimeLabel } = require("./shared/validators");
 
 function findById(items, url) {
   return items.find((item) => item.id === Number(url.pathname.split("/").pop()));
 }
+
+const ORDER_STATUS_VALUES = ["pending_payment", "payment_review", "paid", "cancelled", "completed", "待支付", "支付审核中", "已支付", "已取消", "已完成"];
+const PAYMENT_METHOD_VALUES = ["", "wechat", "alipay", "mock", "微信支付", "支付宝", "模拟支付", "线上支付", "smoke-test"];
+const ACTIVITY_STATUS_VALUES = ["draft", "open", "closed"];
 
 async function handleAdminApi(req, res, url) {
   const method = req.method;
@@ -285,6 +291,10 @@ async function handleAdminApi(req, res, url) {
   }
 
   if (method === "POST" && url.pathname === "/api/admin/orders") {
+    const total = Number(body.total || 0);
+    if (!validNonNegativeNumber(total)) return fail(res, 400, "订单金额必须大于或等于 0");
+    if (!validEnum(body.status || "pending_payment", ORDER_STATUS_VALUES)) return fail(res, 400, "订单状态不正确");
+    if (!validEnum(body.paymentMethod || "", PAYMENT_METHOD_VALUES)) return fail(res, 400, "支付方式不正确");
     const order = {
       id: nextId(db.orders),
       userId: body.userId ? Number(body.userId) : 0,
@@ -293,7 +303,7 @@ async function handleAdminApi(req, res, url) {
       phone: body.phone || "",
       address: body.address || "",
       items: Array.isArray(body.items) ? body.items : [],
-      total: Number(body.total || 0),
+      total,
       status: body.status || "pending_payment",
       paymentMethod: body.paymentMethod || "",
       paidAt: "",
@@ -315,12 +325,21 @@ async function handleAdminApi(req, res, url) {
   if (method === "PATCH" && url.pathname.match(/^\/api\/admin\/orders\/\d+$/)) {
     const order = findById(db.orders, url);
     if (!order) return fail(res, 404, "订单不存在");
+    const total = Number(body.total ?? order.total);
+    if (!validNonNegativeNumber(total)) return fail(res, 400, "订单金额必须大于或等于 0");
+    if (!validEnum(body.status || order.status, ORDER_STATUS_VALUES)) return fail(res, 400, "订单状态不正确");
+    if (!validEnum(body.paymentMethod ?? order.paymentMethod ?? "", PAYMENT_METHOD_VALUES)) return fail(res, 400, "支付方式不正确");
+    const nextStatus = body.status || order.status;
+    const nextPaidAt = nextStatus === "paid" && !order.paidAt ? new Date().toISOString() : (body.paidAt ?? order.paidAt);
+    const nextCancelledAt = nextStatus === "cancelled" && !order.cancelledAt ? new Date().toISOString() : order.cancelledAt;
+    if (nextStatus === "cancelled" && order.status !== "cancelled") await restoreOrderStock(order);
     Object.assign(order, {
       userName: body.userName || order.userName,
-      total: Number(body.total ?? order.total),
-      status: body.status || order.status,
+      total,
+      status: nextStatus,
       paymentMethod: body.paymentMethod ?? order.paymentMethod,
-      paidAt: body.paidAt ?? order.paidAt
+      paidAt: nextPaidAt,
+      cancelledAt: nextCancelledAt
     });
     await persistOrder(order);
     await auditAdmin("更新订单", "order", order.id, `更新订单 #${order.id}，状态：${order.status}`);
@@ -355,6 +374,13 @@ async function handleAdminApi(req, res, url) {
     if (!body.seatId || !body.date || !body.time) return fail(res, 400, "座位、日期和时间必填");
     if (!validPhone(body.phone)) return fail(res, 400, "请输入正确的 11 位手机号");
     if (!validPeople(body.people || 1)) return fail(res, 400, "预约人数必须是 1 到 20 之间的整数");
+    if (!validDateString(body.date, { allowPast: true })) return fail(res, 400, "预约日期格式不正确");
+    if (!validTimeLabel(body.time)) return fail(res, 400, "预约时间格式不正确");
+    if (!/^[A-C][1-6](,[A-C][1-6])*$/.test(String(body.seatId || ""))) return fail(res, 400, "座位编号不正确");
+    if (!validTextLength(body.note || "", 0, 120)) return fail(res, 400, "预约备注不能超过 120 个字符");
+    if (String(body.status || "已预约") !== "已取消" && findSeatConflicts({ seatIds: body.seatId, date: body.date, time: body.time }).length) {
+      return fail(res, 409, "所选座位在该时段已被预约");
+    }
     const reservation = {
       id: nextId(db.reservations),
       userId: Number(body.userId || 0),
@@ -380,6 +406,18 @@ async function handleAdminApi(req, res, url) {
     const people = body.people || reservation.people;
     if (!validPhone(phone)) return fail(res, 400, "请输入正确的 11 位手机号");
     if (!validPeople(people)) return fail(res, 400, "预约人数必须是 1 到 20 之间的整数");
+    if (!validDateString(body.date || reservation.date, { allowPast: true })) return fail(res, 400, "预约日期格式不正确");
+    if (!validTimeLabel(body.time || reservation.time)) return fail(res, 400, "预约时间格式不正确");
+    if (!/^[A-C][1-6](,[A-C][1-6])*$/.test(String(body.seatId || reservation.seatId || ""))) return fail(res, 400, "座位编号不正确");
+    if (!validTextLength(body.note ?? reservation.note ?? "", 0, 120)) return fail(res, 400, "预约备注不能超过 120 个字符");
+    if (String(body.status || reservation.status) !== "已取消" && findSeatConflicts({
+      seatIds: body.seatId || reservation.seatId,
+      date: body.date || reservation.date,
+      time: body.time || reservation.time,
+      ignoreId: reservation.id
+    }).length) {
+      return fail(res, 409, "所选座位在该时段已被其他预约占用");
+    }
     Object.assign(reservation, {
       seatId: body.seatId || reservation.seatId,
       phone,
@@ -408,6 +446,11 @@ async function handleAdminApi(req, res, url) {
     const capacity = Number(body.capacity);
     if (!body.title || !body.date || !body.description) return fail(res, 400, "活动名称、日期和介绍必填");
     if (!Number.isInteger(capacity) || capacity < 1) return fail(res, 400, "活动名额必须是正整数");
+    if (!validTextLength(body.title, 2, 80)) return fail(res, 400, "活动名称需为 2 到 80 个字符");
+    if (!validDateString(body.date, { allowPast: true })) return fail(res, 400, "活动日期格式不正确");
+    if (body.time && !validTimeLabel(body.time)) return fail(res, 400, "活动时间格式不正确");
+    if (!validTextLength(body.description, 2, 1000)) return fail(res, 400, "活动介绍需为 2 到 1000 个字符");
+    if (!validEnum(body.status || "open", ACTIVITY_STATUS_VALUES)) return fail(res, 400, "活动状态不正确");
     const activity = {
       id: nextId(db.activities),
       title: body.title,
@@ -418,6 +461,7 @@ async function handleAdminApi(req, res, url) {
       registrationStart: body.registrationStart || "",
       earlyStart: body.earlyStart || "",
       location: body.location || "",
+      status: body.status || "open",
       description: body.description
     };
     db.activities.push(activity);
@@ -432,6 +476,11 @@ async function handleAdminApi(req, res, url) {
     const capacity = Number(body.capacity ?? activity.capacity);
     if (!Number.isInteger(capacity) || capacity < 1) return fail(res, 400, "活动名额必须是正整数");
     if (capacity < activity.applied) return fail(res, 400, "活动名额不能少于当前报名人数");
+    if (!validTextLength(body.title || activity.title, 2, 80)) return fail(res, 400, "活动名称需为 2 到 80 个字符");
+    if (!validDateString(body.date || activity.date, { allowPast: true })) return fail(res, 400, "活动日期格式不正确");
+    if ((body.time ?? activity.time) && !validTimeLabel(body.time ?? activity.time)) return fail(res, 400, "活动时间格式不正确");
+    if (!validTextLength(body.description || activity.description, 2, 1000)) return fail(res, 400, "活动介绍需为 2 到 1000 个字符");
+    if (!validEnum(body.status || activity.status || "open", ACTIVITY_STATUS_VALUES)) return fail(res, 400, "活动状态不正确");
     Object.assign(activity, {
       title: body.title || activity.title,
       capacity,
@@ -440,6 +489,7 @@ async function handleAdminApi(req, res, url) {
       registrationStart: body.registrationStart ?? activity.registrationStart,
       earlyStart: body.earlyStart ?? activity.earlyStart,
       location: body.location ?? activity.location,
+      status: body.status || activity.status || "open",
       description: body.description || activity.description
     });
     await persistActivity(activity);
@@ -460,6 +510,7 @@ async function handleAdminApi(req, res, url) {
   if (method === "PATCH" && url.pathname.match(/^\/api\/admin\/posts\/\d+$/)) {
     const post = findById(db.posts, url);
     if (!post) return fail(res, 404, "动态不存在");
+    if (!validTextLength(body.title || post.title, 2, 80) || !validTextLength(body.content || post.content, 2, 2000)) return fail(res, 400, "动态标题或内容长度不正确");
     Object.assign(post, { title: body.title || post.title, content: body.content || post.content });
     await persistPost(post);
     await auditAdmin("更新社区动态", "post", post.id, `更新动态 #${post.id}《${post.title}》`);
@@ -467,7 +518,7 @@ async function handleAdminApi(req, res, url) {
   }
 
   if (method === "POST" && url.pathname === "/api/admin/posts") {
-    if (!body.title || !body.content) return fail(res, 400, "标题和内容必填");
+    if (!validTextLength(body.title, 2, 80) || !validTextLength(body.content, 2, 2000)) return fail(res, 400, "标题和内容长度不正确");
     const post = { id: nextId(db.posts), userId: 0, author: body.author || "运营团队", avatar: "", title: body.title, content: body.content, image: "", likedBy: [], likes: 0, comments: [] };
     db.posts.unshift(post);
     await persistPost(post);
