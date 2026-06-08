@@ -30,6 +30,11 @@ const categoryText = {
 const allSelected = computed(() => cartStore.items.length > 0 && cartStore.selectedIds.length === cartStore.items.length);
 const memberLevel = computed(() => userStore.member?.level || userStore.user?.level || "普通会员");
 const freeShippingGap = computed(() => Math.max(0, 168 - cartStore.subtotal));
+const pointsDeduction = computed(() => {
+  const points = Number(userStore.member?.points || userStore.user?.points || 0);
+  return Math.min(cartStore.subtotal * 0.04, Math.floor(points / 100) || 0);
+});
+const displayPayAmount = computed(() => Math.max(0, cartStore.payAmount - pointsDeduction.value));
 const cartGroups = computed(() => {
   const groups = new Map();
   cartStore.items.forEach((item) => {
@@ -93,8 +98,25 @@ function itemTag(item) {
 
 function imageFallback(event) {
   event.currentTarget.classList.add("image-placeholder-active");
-  event.currentTarget.removeAttribute("src");
-  event.currentTarget.alt = "";
+  event.currentTarget.src = cartPlaceholder();
+}
+
+function cartPlaceholder() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="760" height="560" viewBox="0 0 760 560">
+    <defs>
+      <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+        <stop stop-color="#fff4e6"/>
+        <stop offset=".58" stop-color="#d69a57"/>
+        <stop offset="1" stop-color="#8b5e3c"/>
+      </linearGradient>
+    </defs>
+    <rect width="760" height="560" fill="url(#g)"/>
+    <circle cx="612" cy="94" r="112" fill="#fffdf8" opacity=".25"/>
+    <rect x="118" y="152" width="360" height="210" rx="36" fill="#fffdf8" opacity=".55"/>
+    <path d="M178 286c78-56 170-62 268-18" fill="none" stroke="#4a2c17" stroke-width="28" stroke-linecap="round" opacity=".2"/>
+    <text x="118" y="438" fill="#4a2c17" font-family="Arial, sans-serif" font-size="38" font-weight="900">Coffee Book</text>
+  </svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 function checkout() {
@@ -127,13 +149,26 @@ function askRemove(item) {
   pendingRemove.value = item;
 }
 
+function askRemoveSelected() {
+  if (!cartStore.selectedItems.length) return;
+  pendingRemove.value = { bulk: true, items: [...cartStore.selectedItems], name: `${cartStore.selectedItems.length} 件选中商品` };
+}
+
 async function removeItem(item = pendingRemove.value, withToast = true) {
   if (!item) return;
   quantityError.value = "";
   try {
-    if (userStore.isLoggedIn) await cartStore.syncRemoveProduct(item.productId);
-    else cartStore.removeProduct(item.productId);
-    if (withToast) showToast("商品已从购物车移除");
+    if (item.bulk) {
+      for (const target of item.items) {
+        if (userStore.isLoggedIn) await cartStore.syncRemoveProduct(target.productId);
+        else cartStore.removeProduct(target.productId);
+      }
+      if (withToast) showToast("选中商品已从购物车移除");
+    } else {
+      if (userStore.isLoggedIn) await cartStore.syncRemoveProduct(item.productId);
+      else cartStore.removeProduct(item.productId);
+      if (withToast) showToast("商品已从购物车移除");
+    }
   } catch (err) {
     quantityError.value = err.message;
     showToast(err.message, "danger");
@@ -175,15 +210,15 @@ async function addRecommend(product) {
   <section class="section cart-page-pro" data-testid="cart-page">
     <BaseToast :visible="Boolean(toastMessage)" :message="toastMessage" :type="toastType" />
 
-    <div class="member-hero-pro cart-hero">
-      <div>
+    <div class="cart-hero-final">
+      <div class="cart-hero-copy">
         <p class="eyebrow">Coffee Book Cart</p>
-        <h2>购物车</h2>
-        <p class="lead">把咖啡、文创和阅读好物放进同一张订单，享受会员优惠与积分返还。</p>
-        <div class="hero-chip-row">
-          <StatusBadge :label="`${cartStore.items.length} 件商品`" type="accent" />
-          <StatusBadge :label="`${cartStore.selectedCount} 件已选`" type="success" />
-          <StatusBadge :label="memberLevel" type="warning" />
+        <h1>我的购物车</h1>
+        <p>优质的咖啡与好书，轻松带回家。</p>
+        <div class="cart-hero-stats">
+          <span>商品 {{ cartStore.items.length }}</span>
+          <span>已选 {{ cartStore.selectedCount }}</span>
+          <span>{{ memberLevel }}</span>
         </div>
       </div>
       <RouterLink class="btn ghost" to="/shop">继续选购</RouterLink>
@@ -203,12 +238,18 @@ async function addRecommend(product) {
           <article class="card cart-control-bar">
             <label class="cart-select-all">
               <input type="checkbox" :checked="allSelected" @change="cartStore.toggleAll($event.target.checked)" />
-              <span>全选本次结算商品</span>
+              <span>全选（{{ cartStore.items.length }}）</span>
             </label>
+            <button class="link-button danger" type="button" :disabled="!cartStore.selectedItems.length" @click="askRemoveSelected">
+              删除选中
+            </button>
+            <button class="link-button" type="button" :disabled="!cartStore.selectedItems.length" @click="showToast('已为选中商品保留收藏入口')">
+              移入收藏夹
+            </button>
             <p v-if="quantityError" class="form-error">{{ quantityError }}</p>
             <div class="cart-coupon-strip">
               <strong>会员优惠</strong>
-              <span>满 99 减 10，满 168 减 20，结算后同步积分成长值。</span>
+              <span>满 99 减 10，满 168 减 20，积分可抵扣本单金额。</span>
             </div>
           </article>
 
@@ -263,7 +304,7 @@ async function addRecommend(product) {
                 <strong>¥{{ (item.price * item.quantity).toFixed(2) }}</strong>
               </div>
               <div class="cart-item-actions">
-                <button class="link-button" type="button" @click="moveToFavorite(item)">移入收藏</button>
+                <button class="cart-icon-action" type="button" aria-label="移入收藏" @click="moveToFavorite(item)">♡</button>
                 <button class="link-button danger" type="button" @click="askRemove(item)">删除</button>
               </div>
             </div>
@@ -275,9 +316,10 @@ async function addRecommend(product) {
             <p class="eyebrow">Order Summary</p>
             <h3>订单摘要</h3>
             <div class="price-line"><span>已选数量</span><strong>{{ cartStore.selectedCount }} 件</strong></div>
-            <div class="price-line"><span>商品小计</span><strong>¥{{ cartStore.subtotal.toFixed(2) }}</strong></div>
-            <div class="price-line"><span>会员优惠</span><strong class="discount">-¥{{ cartStore.discountAmount.toFixed(2) }}</strong></div>
-            <div class="price-line total"><span>应付金额</span><strong>¥{{ cartStore.payAmount.toFixed(2) }}</strong></div>
+            <div class="price-line"><span>商品总价</span><strong>¥{{ cartStore.subtotal.toFixed(2) }}</strong></div>
+            <div class="price-line"><span>优惠金额</span><strong class="discount">-¥{{ cartStore.discountAmount.toFixed(2) }}</strong></div>
+            <div class="price-line"><span>积分抵扣</span><strong class="discount">-¥{{ pointsDeduction.toFixed(2) }}</strong></div>
+            <div class="price-line total"><span>实付金额</span><strong>¥{{ displayPayAmount.toFixed(2) }}</strong></div>
             <div class="summary-hint">
               <strong v-if="freeShippingGap > 0">再购 ¥{{ freeShippingGap.toFixed(2) }} 可享满减</strong>
               <strong v-else>已解锁最高满减</strong>
@@ -295,6 +337,12 @@ async function addRecommend(product) {
               <li>部分文创商品支持门店自提免运费</li>
               <li>礼品券可在积分中心兑换并核销</li>
             </ul>
+          </article>
+
+          <article class="card cart-service-card">
+            <span>正品保障</span>
+            <span>极速发货</span>
+            <span>7天无理由</span>
           </article>
         </aside>
       </div>

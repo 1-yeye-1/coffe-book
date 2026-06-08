@@ -37,6 +37,11 @@ const navLinks = [
       <RouterLink v-for="item in navLinks" :key="item.to" :to="item.to">{{ item.label }}</RouterLink>
     </nav>
 
+    <label class="app-header__search">
+      <span class="sr-only">搜索</span>
+      <input type="search" placeholder="搜索书籍 / 咖啡 / 活动" />
+    </label>
+
     <div class="app-header__actions">
       <template v-if="isLoggedIn">
         <RouterLink class="header-icon-link" to="/cart" aria-label="购物车">

@@ -32,13 +32,16 @@ defineEmits(["retry"]);
     </div>
   </div>
 
-  <div v-else-if="empty" class="state-card empty-state-rich">
-    <span class="state-icon" aria-hidden="true">0</span>
-    <div>
-      <strong>{{ emptyTitle }}</strong>
-      <p>{{ description || "换个筛选条件试试，或先创建一条新记录。" }}</p>
-      <slot name="action"></slot>
+  <div v-else-if="empty" class="data-state-stack">
+    <div class="state-card empty-state-rich">
+      <span class="state-icon" aria-hidden="true">0</span>
+      <div>
+        <strong>{{ emptyTitle }}</strong>
+        <p>{{ description || "换个筛选条件试试，或先创建一条新记录。" }}</p>
+        <slot name="action"></slot>
+      </div>
     </div>
+    <slot></slot>
   </div>
 
   <slot v-else></slot>

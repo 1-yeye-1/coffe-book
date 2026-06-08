@@ -16,11 +16,26 @@ const toastType = ref("success");
 const member = computed(() => userStore.member);
 const membership = computed(() => member.value?.membership || {});
 const rewards = computed(() => membership.value.rewards || []);
+const pointValue = computed(() => (Number(member.value?.points || 0) / 10).toFixed(1));
+const annualPoints = computed(() => Math.max(Number(member.value?.points || 0), Number(membership.value.current || 0) * 2));
 const progressPercent = computed(() => {
   const target = Number(membership.value.target || 1);
   const current = Number(membership.value.current || 0);
   return Math.min(100, Math.round((current / target) * 100));
 });
+const quickBenefits = [
+  { icon: "☕", title: "积分兑换", desc: "兑换咖啡券" },
+  { icon: "▣", title: "抵扣现金", desc: "下单可抵扣" },
+  { icon: "◎", title: "参与活动", desc: "活动优先权" },
+  { icon: "♢", title: "会员特权", desc: "专属折扣" }
+];
+const rights = [
+  { icon: "▣", title: "积分抵现", desc: "最高可抵订单金额 50%" },
+  { icon: "☕", title: "积分兑换", desc: "兑换咖啡、周边和优惠券" },
+  { icon: "★", title: "会员活动", desc: "积分可参与专属活动" },
+  { icon: "◇", title: "生日礼包", desc: "生日当月双倍积分" },
+  { icon: "✓", title: "优先体验", desc: "新品优先试用资格" }
+];
 const taskCards = computed(() => [
   {
     title: "每日签到",
@@ -107,7 +122,7 @@ async function redeem(reward) {
 </script>
 
 <template>
-  <section class="section points-page-pro">
+  <section class="section points-page-pro" data-testid="points-page">
     <BaseToast :visible="Boolean(toastMessage)" :message="toastMessage" :type="toastType" />
 
     <DataState
@@ -119,23 +134,44 @@ async function redeem(reward) {
       description="登录后即可查看积分、成长值和会员权益。"
       @retry="loadMember"
     >
-      <div class="points-hero-pro">
-        <div>
+      <div class="points-hero-final">
+        <div class="points-hero-copy">
           <p class="eyebrow">Member Points</p>
-          <h2>积分中心</h2>
-          <p class="lead">签到、消费、参与活动都能沉淀成长值，用积分兑换咖啡券、文创优惠和活动权益。</p>
-          <div class="hero-chip-row">
-            <StatusBadge :label="membership.level || member.level" type="accent" />
-            <StatusBadge :label="membership.checkedInToday ? '今日已签到' : '今日未签到'" :type="membership.checkedInToday ? 'success' : 'warning'" />
-          </div>
+          <h1>积分中心</h1>
+          <p>每一次互动，都是积分的积累。用积分兑换咖啡、周边和会员专属权益。</p>
         </div>
         <div class="points-balance-card">
-          <span>当前积分</span>
-          <strong>{{ member.points }}</strong>
+          <span>当前可用积分</span>
+          <strong>{{ member?.points || 0 }}</strong>
+          <small>积分价值约 ¥{{ pointValue }}</small>
           <button class="btn" type="button" :disabled="membership.checkedInToday" @click="checkIn">
             {{ membership.checkedInToday ? "已签到" : "立即签到" }}
           </button>
         </div>
+      </div>
+
+      <div class="points-overview-grid">
+        <article class="points-value-card">
+          <p class="eyebrow">Points Value</p>
+          <h3>1 积分 = ¥0.1</h3>
+          <div class="points-benefit-icons">
+            <span v-for="item in quickBenefits" :key="item.title">
+              <b>{{ item.icon }}</b>
+              <small>{{ item.title }}</small>
+            </span>
+          </div>
+        </article>
+        <article class="points-member-card">
+          <div>
+            <p class="eyebrow">{{ membership.level || member?.level || "普通会员" }}</p>
+            <h3>{{ membership.level || member?.level || "普通会员" }}会员</h3>
+          </div>
+          <div class="member-growth-bar">
+            <span :style="{ width: `${progressPercent}%` }"></span>
+          </div>
+          <p>成长值 {{ membership.current || membership.levelProgress || 0 }} / {{ membership.target || 1000 }}</p>
+          <button class="btn ghost" type="button" @click="showToast('会员权益已展示在下方')">查看会员权益</button>
+        </article>
       </div>
 
       <div class="points-layout-pro">
@@ -149,7 +185,7 @@ async function redeem(reward) {
               <strong>{{ progressPercent }}%</strong>
             </div>
             <div class="mini-progress"><span :style="{ width: `${progressPercent}%` }"></span></div>
-            <p class="muted">当前成长值 {{ membership.levelProgress || 0 }}，距离下一等级还需 {{ membership.need || 0 }}。</p>
+            <p class="muted">当前成长值 {{ membership.levelProgress || membership.current || 0 }}，距离下一等级还需 {{ membership.need || 0 }}。</p>
           </article>
 
           <section class="section-block">
@@ -161,6 +197,7 @@ async function redeem(reward) {
             </div>
             <div class="task-card-grid">
               <article v-for="task in taskCards" :key="task.title" class="card task-card" :class="{ done: task.done }">
+                <div class="task-card-icon">{{ task.title.slice(0, 1) }}</div>
                 <StatusBadge :label="task.done ? '已完成' : '待完成'" :type="task.done ? 'success' : 'warning'" />
                 <h3>{{ task.title }}</h3>
                 <p>{{ task.desc }}</p>
@@ -188,8 +225,8 @@ async function redeem(reward) {
                   <p>{{ reward.desc }}</p>
                   <div class="cart-total">
                     <strong>{{ reward.cost }} 积分</strong>
-                    <button class="btn" type="button" :disabled="member.points < reward.cost || loadingReward === reward.id" @click="redeem(reward)">
-                      {{ loadingReward === reward.id ? "兑换中..." : member.points < reward.cost ? "积分不足" : "立即兑换" }}
+                    <button class="btn" type="button" :disabled="(member?.points || 0) < reward.cost || loadingReward === reward.id" @click="redeem(reward)">
+                      {{ loadingReward === reward.id ? "兑换中..." : (member?.points || 0) < reward.cost ? "积分不足" : "立即兑换" }}
                     </button>
                   </div>
                 </div>
@@ -201,9 +238,13 @@ async function redeem(reward) {
         <aside class="points-side-stack">
           <article class="card member-rights-card">
             <h3>积分专属权益</h3>
-            <ul class="clean-list">
-              <li v-for="benefit in (membership.benefits || [])" :key="benefit">{{ benefit }}</li>
-            </ul>
+            <div class="points-rights-list">
+              <div v-for="benefit in rights" :key="benefit.title">
+                <span>{{ benefit.icon }}</span>
+                <b>{{ benefit.title }}</b>
+                <small>{{ benefit.desc }}</small>
+              </div>
+            </div>
           </article>
 
           <article class="card point-record-card">
@@ -225,9 +266,18 @@ async function redeem(reward) {
               <span>{{ level.name }}</span>
               <strong>{{ level.min }}+</strong>
             </div>
+            <p class="muted">本年度累计积分 {{ annualPoints }}，等级越高兑换权益越丰富。</p>
           </article>
         </aside>
       </div>
+
+      <section class="points-rights-band">
+        <article v-for="benefit in rights" :key="`band-${benefit.title}`">
+          <span>{{ benefit.icon }}</span>
+          <strong>{{ benefit.title }}</strong>
+          <small>{{ benefit.desc }}</small>
+        </article>
+      </section>
     </DataState>
   </section>
 </template>

@@ -133,21 +133,39 @@ function runAnimations() {
       </div>
       <div class="home-hero-pro__overlay"></div>
       <div class="home-hero-pro__copy">
-        <span class="hero-eyebrow">Coffee · Books · Community</span>
-        <h1>咖啡书屋</h1>
-        <p>把精品咖啡、城市阅读、文创零售和社群活动放进一个高互动空间，让每一次到店都有新内容可探索。</p>
-        <div class="actions">
-          <RouterLink class="btn" to="/reservations">立即预约</RouterLink>
-          <RouterLink class="btn secondary" to="/shop">逛文创商城</RouterLink>
+        <div class="home-hero-pro__content">
+          <span class="hero-eyebrow">Coffee · Books · Community</span>
+          <h1 class="home-hero-pro__title">
+            <span>咖啡书屋</span>
+            <small>Coffee Book Club</small>
+          </h1>
+          <p class="home-hero-pro__lead">把精品咖啡、城市阅读、文创零售和社群活动放进一个高互动空间，让每一次到店都有新内容可探索。</p>
+          <div class="actions home-hero-pro__actions">
+            <RouterLink class="btn" to="/reservations">立即预约</RouterLink>
+            <RouterLink class="btn secondary" to="/shop">逛文创商城</RouterLink>
+          </div>
         </div>
 
-        <div v-if="stats.length" class="home-hero-pro__stats">
-          <article v-for="(item, index) in stats.slice(0, 4)" :key="item.label">
-            <strong>{{ formatStat(index, item.value) }}</strong>
-            <span>{{ item.label }}</span>
-          </article>
-        </div>
+        <aside class="home-hero-pro__brand-card" aria-label="品牌信息">
+          <span>Since 2019</span>
+          <strong>城市阅读咖啡馆</strong>
+          <p>咖啡、书籍、活动、社区与会员体系，一站式连接到店体验。</p>
+          <div>
+            <b>09:00 - 22:30</b>
+            <small>Daily Open</small>
+          </div>
+        </aside>
       </div>
+    </section>
+
+    <section v-if="stats.length" class="home-stats-section" aria-label="咖啡书屋数据概览" data-reveal>
+      <article v-for="(item, index) in stats.slice(0, 4)" :key="item.label" class="home-stat-card">
+        <div>
+          <strong>{{ formatStat(index, item.value) }}</strong>
+          <span>{{ item.label }}</span>
+        </div>
+        <small>Coffee Book Data</small>
+      </article>
     </section>
 
     <section class="home-channel-grid" data-reveal>

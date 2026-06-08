@@ -34,10 +34,10 @@ const progressPercent = computed(() => {
   return Math.min(100, Math.round((current / target) * 100));
 });
 const dataCards = computed(() => [
-  { label: "收藏内容", value: stats.value.favoriteBooks, to: "/favorites", type: "accent" },
-  { label: "社区互动", value: stats.value.publishedComments, to: "/community", type: "success" },
-  { label: "订单数量", value: stats.value.orderCount, to: "/orders", type: "warning" },
-  { label: "礼品数量", value: member.value?.gifts?.length || 0, to: "/gifts", type: "default" }
+  { label: "收藏内容", value: stats.value.favoriteBooks, to: "/favorites", type: "accent", icon: "藏" },
+  { label: "社区互动", value: stats.value.publishedComments, to: "/community", type: "success", icon: "评" },
+  { label: "订单数量", value: stats.value.orderCount, to: "/orders", type: "warning", icon: "单" },
+  { label: "礼品数量", value: member.value?.gifts?.length || 0, to: "/gifts", type: "default", icon: "礼" }
 ]);
 const interestTags = computed(() => {
   const tags = [
@@ -51,6 +51,20 @@ const badgeCards = computed(() => [
   { title: membership.value.level || member.value?.level || "普通会员", desc: "当前会员等级", type: "accent" },
   { title: `${member.value?.points || 0} 积分`, desc: "可用于礼品兑换", type: "success" },
   { title: membership.value.checkedInToday ? "今日已签到" : "今日待签到", desc: "每日签到提升成长值", type: membership.value.checkedInToday ? "success" : "warning" }
+]);
+const preferenceCards = computed(() => [
+  {
+    label: "咖啡偏好",
+    value: form.coffeePreference || "还未填写咖啡口味",
+    hint: "用于推荐手冲、拿铁和季节限定饮品",
+    icon: "C"
+  },
+  {
+    label: "阅读偏好",
+    value: form.bookPreference || "还未填写阅读方向",
+    hint: "用于匹配书库分类、活动和社区内容",
+    icon: "B"
+  }
 ]);
 
 onMounted(loadProfile);
@@ -139,6 +153,10 @@ function handleAvatar(event) {
   reader.readAsDataURL(file);
 }
 
+function handleAvatarError() {
+  form.avatar = "";
+}
+
 async function save() {
   error.value = "";
   const validation = validateProfile();
@@ -165,7 +183,7 @@ async function save() {
 </script>
 
 <template>
-  <section class="section profile-pro-page">
+  <section class="section profile-pro-page" data-testid="profile-page">
     <BaseToast :visible="Boolean(toastMessage)" :message="toastMessage" :type="toastType" />
 
     <DataState
@@ -177,24 +195,32 @@ async function save() {
       description="登录后即可编辑基础资料、阅读偏好与咖啡偏好。"
       @retry="loadProfile"
     >
-      <div class="profile-hero-pro">
+      <div class="profile-hero-pro profile-hero-final">
         <div class="profile-identity">
           <div class="profile-avatar-xl">
-            <img v-if="form.avatar" :src="form.avatar" alt="头像预览" />
+            <img v-if="form.avatar" :src="form.avatar" alt="头像预览" @error="handleAvatarError" />
             <span v-else>{{ avatarText(form.name) }}</span>
           </div>
-          <div>
+          <div class="profile-identity-copy">
             <p class="eyebrow">Profile</p>
             <h2>{{ form.name || "咖啡书屋会员" }}</h2>
             <p class="lead">{{ form.bio || "完善资料后，书屋会更懂你的阅读和咖啡偏好。" }}</p>
             <div class="hero-chip-row">
-              <StatusBadge :label="member.level || '普通会员'" type="accent" />
-              <StatusBadge :label="`${member.points || 0} 积分`" type="success" />
-              <StatusBadge :label="member.showProfile === false ? '主页私密' : '主页公开'" type="warning" />
+              <StatusBadge :label="member?.level || '普通会员'" type="accent" />
+              <StatusBadge :label="`${member?.points || 0} 积分`" type="success" />
+              <StatusBadge :label="member?.showProfile === false ? '主页私密' : '主页公开'" type="warning" />
             </div>
           </div>
         </div>
-        <label class="btn ghost upload-button">更换头像<input type="file" accept="image/*" @change="handleAvatar" /></label>
+        <div class="profile-hero-panel">
+          <div>
+            <span>会员成长值</span>
+            <strong>{{ membership.current || 0 }} / {{ membership.target || 0 }}</strong>
+          </div>
+          <div class="mini-progress"><span :style="{ width: `${progressPercent}%` }"></span></div>
+          <p>距离 {{ membership.nextLevel || "下一等级" }} 还需 {{ membership.need || 0 }} 成长值</p>
+          <label class="btn ghost upload-button">更换头像<input type="file" accept="image/*" @change="handleAvatar" /></label>
+        </div>
       </div>
 
       <div class="profile-pro-layout">
@@ -203,7 +229,7 @@ async function save() {
             <div class="level-progress-head">
               <div>
                 <p class="eyebrow">Member Growth</p>
-                <h3>{{ membership.level || member.level }}</h3>
+                <h3>{{ membership.level || member?.level || "普通会员" }}</h3>
               </div>
               <strong>{{ progressPercent }}%</strong>
             </div>
@@ -231,9 +257,10 @@ async function save() {
         </aside>
 
         <main class="profile-main-stack">
-          <div class="member-stat-grid">
+          <div class="member-stat-grid profile-stat-grid-final">
             <RouterLink v-for="item in dataCards" :key="item.label" class="card member-stat-card link-card" :to="item.to">
-              <StatusBadge :label="item.label" :type="item.type" />
+              <span class="profile-stat-icon">{{ item.icon }}</span>
+              <span>{{ item.label }}</span>
               <strong>{{ item.value }}</strong>
             </RouterLink>
           </div>
@@ -244,7 +271,7 @@ async function save() {
                 <p class="eyebrow">Basic Info</p>
                 <h3>基础资料</h3>
               </div>
-              <button class="btn" type="submit" :disabled="saving">{{ saving ? "保存中..." : "保存资料" }}</button>
+              <button class="btn profile-save-btn" type="submit" :disabled="saving">{{ saving ? "保存中..." : "保存资料" }}</button>
             </div>
             <div class="profile-fields-grid">
               <label class="field"><span>昵称</span><input v-model.trim="form.name" maxlength="30" /></label>
@@ -262,12 +289,22 @@ async function save() {
                 <h3>偏好设置</h3>
               </div>
             </div>
+            <div class="profile-preference-preview">
+              <article v-for="item in preferenceCards" :key="item.label" class="profile-preference-card">
+                <span>{{ item.icon }}</span>
+                <div>
+                  <small>{{ item.label }}</small>
+                  <strong>{{ item.value }}</strong>
+                  <em>{{ item.hint }}</em>
+                </div>
+              </article>
+            </div>
             <div class="preference-card-grid">
               <label class="field"><span>咖啡偏好</span><input v-model.trim="form.coffeePreference" maxlength="60" placeholder="例如：手冲、拿铁、冷萃" /></label>
               <label class="field"><span>阅读偏好</span><input v-model.trim="form.bookPreference" maxlength="60" placeholder="例如：文学、商业、艺术" /></label>
             </div>
             <label class="field"><span>常用收货地址</span><textarea v-model.trim="form.address" rows="3" maxlength="160" placeholder="用于文创商品配送"></textarea></label>
-            <button class="btn ghost" type="button" :disabled="saving" @click="save">{{ saving ? "保存中..." : "保存偏好" }}</button>
+            <button class="btn ghost profile-save-btn secondary" type="button" :disabled="saving" @click="save">{{ saving ? "保存中..." : "保存偏好" }}</button>
           </article>
         </main>
       </div>
