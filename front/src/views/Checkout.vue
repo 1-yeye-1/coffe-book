@@ -2,44 +2,61 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useCartStore } from "@/stores/cart";
+import { useCommercialStore } from "@/stores/commercial";
 import { useOrderStore } from "@/stores/order";
 import { useUserStore } from "@/stores/user";
 
 const router = useRouter();
 const cartStore = useCartStore();
+const commercialStore = useCommercialStore();
 const orderStore = useOrderStore();
 const userStore = useUserStore();
 const loading = ref(false);
 const error = ref("");
-
-const coupons = [
-  { id: "none", name: "不使用优惠券", amount: 0 },
-  { id: "coffee10", name: "咖啡书屋新人券 -10", amount: 10 },
-  { id: "premium20", name: "黑金满额礼券 -20", amount: 20 }
-];
 
 const form = reactive({
   deliveryType: "pickup",
   contactName: userStore.user?.name || "",
   phone: userStore.user?.phone || "",
   remark: "",
-  coupon: cartStore.subtotal >= 99 ? "coffee10" : "none",
+  coupon: "none",
   usePoints: false
 });
 
-const selectedCoupon = computed(() => coupons.find((item) => item.id === form.coupon) || coupons[0]);
+const memberDiscountRate = computed(() => Number(commercialStore.memberLevel?.discountRate || userStore.member?.membership?.discountRate || 1));
+const coupons = computed(() => {
+  const totalAmount = cartStore.selectedItems.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity || 1), 0);
+  const usable = commercialStore.unusedCoupons
+    .filter((coupon) => totalAmount >= Number(coupon.threshold || 0))
+    .map((coupon) => ({
+      ...coupon,
+      id: coupon.couponId,
+      amount: coupon.type === "discount" || (coupon.type === "member_exclusive" && Number(coupon.value) < 1)
+        ? Math.max(0, totalAmount - totalAmount * Number(coupon.value || 1))
+        : Number(coupon.value || 0)
+    }));
+  return [{ id: "none", name: "不使用优惠券", amount: 0 }, ...usable];
+});
+const selectedCoupon = computed(() => coupons.value.find((item) => String(item.id) === String(form.coupon)) || coupons.value[0]);
 const price = computed(() => {
   const totalAmount = cartStore.selectedItems.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity || 1), 0);
   const deliveryFee = form.deliveryType === "delivery" ? 8 : 0;
   const autoDiscount = totalAmount >= 168 ? 20 : totalAmount >= 99 ? 10 : 0;
-  const discountAmount = Math.min(totalAmount, Math.max(autoDiscount, selectedCoupon.value.amount));
+  const couponDiscount = Math.min(totalAmount, Math.max(autoDiscount, Number(selectedCoupon.value.amount || 0)));
+  const memberDiscount = Number((totalAmount * (1 - memberDiscountRate.value)).toFixed(2));
+  const discountAmount = Math.min(totalAmount, couponDiscount + memberDiscount);
   const pointsDeduction = form.usePoints ? Math.min(12, Math.floor(totalAmount * 0.05)) : 0;
   const payAmount = Math.max(0, totalAmount + deliveryFee - discountAmount - pointsDeduction);
-  return { totalAmount, deliveryFee, discountAmount, pointsDeduction, payAmount };
+  return { totalAmount, deliveryFee, couponDiscount, memberDiscount, discountAmount, pointsDeduction, payAmount };
 });
 
-onMounted(() => {
+onMounted(async () => {
   if (!cartStore.selectedItems.length && cartStore.items.length) cartStore.toggleAll(true);
+  await Promise.allSettled([
+    commercialStore.fetchMemberLevel(),
+    commercialStore.fetchMemberCoupons()
+  ]);
+  if (form.coupon === "none" && coupons.value.length > 1) form.coupon = coupons.value[1].id;
 });
 
 function validPhone(phone) {
@@ -82,6 +99,8 @@ async function submit() {
       deliveryType: form.deliveryType,
       remark: String(form.remark || "").trim(),
       coupon: form.coupon,
+      couponId: form.coupon === "none" ? "" : form.coupon,
+      memberDiscountRate: memberDiscountRate.value,
       ...price.value
     });
     router.push(`/pay/${order.id}`);
@@ -152,7 +171,8 @@ async function submit() {
         <label class="toggle-field"><input v-model="form.usePoints" type="checkbox" /> 使用积分抵扣</label>
         <div class="price-line"><span>商品金额</span><strong>￥{{ price.totalAmount.toFixed(2) }}</strong></div>
         <div class="price-line"><span>配送费</span><strong>￥{{ price.deliveryFee.toFixed(2) }}</strong></div>
-        <div class="price-line"><span>优惠金额</span><strong class="discount">-￥{{ price.discountAmount.toFixed(2) }}</strong></div>
+        <div class="price-line"><span>会员折扣</span><strong class="discount">-￥{{ price.memberDiscount.toFixed(2) }}</strong></div>
+        <div class="price-line"><span>优惠券/满减</span><strong class="discount">-￥{{ price.couponDiscount.toFixed(2) }}</strong></div>
         <div class="price-line"><span>积分抵扣</span><strong class="discount">-￥{{ price.pointsDeduction.toFixed(2) }}</strong></div>
         <div class="price-line total"><span>实付金额</span><strong>￥{{ price.payAmount.toFixed(2) }}</strong></div>
         <p v-if="error" class="form-error">{{ error }}</p>

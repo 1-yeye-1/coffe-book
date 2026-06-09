@@ -25,6 +25,29 @@ const {
   persistUser
 } = require("./shared/mysql");
 const { adminSummary } = require("./modules/admin-summary");
+const {
+  couponStats,
+  createCoupon,
+  ensureCommercialData,
+  memberLevelDistribution,
+  upsertMemberLevel
+} = require("./modules/commercial");
+const {
+  ensureEngagementData,
+  upsertBadge,
+  upsertTaskRule
+} = require("./modules/engagement");
+const {
+  activityFunnelAnalysis,
+  funnels: businessFunnels,
+  memberLevelAnalysis,
+  memberAnalytics,
+  overview: businessOverview,
+  productRepeatAnalysis,
+  recommendationAnalytics,
+  trends: businessTrends,
+  userSegmentationAnalysis
+} = require("./modules/business");
 const { findSeatConflicts } = require("./modules/reservations");
 const { restoreOrderStock } = require("./modules/orders");
 const {
@@ -35,6 +58,13 @@ const {
   rejectOrderPayment,
   rejectPayment
 } = require("./modules/payments");
+const {
+  deleteAnnouncement,
+  ensureNotificationData,
+  notificationStats,
+  sendNotification,
+  upsertAnnouncement
+} = require("./modules/notifications");
 const { auditActivity } = require("./shared/audit");
 const { nextId, validBirthday, validDateString, validEmail, validEnum, validNonNegativeInteger, validNonNegativeNumber, validPeople, validPhone, validTextLength, validTimeLabel } = require("./shared/validators");
 
@@ -77,6 +107,117 @@ async function handleAdminApi(req, res, url) {
     detail
   });
   if (method === "GET" && url.pathname === "/api/admin/summary") return ok(res, await adminSummary());
+  if (method === "GET" && url.pathname === "/api/admin/business/overview") return ok(res, businessOverview());
+  if (method === "GET" && url.pathname === "/api/admin/business/trends") return ok(res, businessTrends(Number(url.searchParams.get("days") || 14)));
+  if (method === "GET" && url.pathname === "/api/admin/business/funnel") return ok(res, businessFunnels());
+  if (method === "GET" && url.pathname === "/api/admin/business/members") return ok(res, memberAnalytics());
+  if (method === "GET" && url.pathname === "/api/admin/business/recommendations") return ok(res, recommendationAnalytics());
+  if (method === "GET" && url.pathname === "/api/admin/business/activity-funnel") return ok(res, activityFunnelAnalysis());
+  if (method === "GET" && url.pathname === "/api/admin/business/user-segmentation") return ok(res, userSegmentationAnalysis());
+  if (method === "GET" && url.pathname === "/api/admin/business/product-repeat") return ok(res, productRepeatAnalysis());
+  if (method === "GET" && url.pathname === "/api/admin/business/member-analysis") return ok(res, memberLevelAnalysis());
+  if (method === "GET" && url.pathname === "/api/admin/notifications") {
+    ensureNotificationData();
+    return ok(res, { items: db.notificationRecords, announcements: db.announcements || [], stats: notificationStats() });
+  }
+  if (method === "GET" && url.pathname === "/api/admin/notifications/stats") {
+    ensureNotificationData();
+    return ok(res, notificationStats());
+  }
+  if (method === "POST" && url.pathname === "/api/admin/notifications") {
+    try {
+      const result = sendNotification(body, admin);
+      await auditAdmin("手动推送消息", "notification", 0, `手动推送 ${result.count} 条消息`);
+      return ok(res, result, "消息已推送");
+    } catch (error) {
+      return fail(res, 400, error.message);
+    }
+  }
+  if (method === "POST" && url.pathname === "/api/admin/announcements") {
+    try {
+      const announcement = upsertAnnouncement(body);
+      await auditAdmin("发布系统公告", "announcement", announcement.id, `发布公告 ${announcement.title}`);
+      return ok(res, announcement, "公告已发布");
+    } catch (error) {
+      return fail(res, 400, error.message);
+    }
+  }
+  if (method === "PUT" && url.pathname.match(/^\/api\/admin\/announcements\/\d+$/)) {
+    try {
+      const announcement = upsertAnnouncement({ ...body, id: Number(url.pathname.split("/").pop()) });
+      await auditAdmin("编辑系统公告", "announcement", announcement.id, `编辑公告 ${announcement.title}`);
+      return ok(res, announcement, "公告已更新");
+    } catch (error) {
+      return fail(res, 400, error.message);
+    }
+  }
+  if (method === "DELETE" && url.pathname.match(/^\/api\/admin\/announcements\/\d+$/)) {
+    const id = Number(url.pathname.split("/").pop());
+    if (!deleteAnnouncement(id)) return fail(res, 404, "公告不存在");
+    await auditAdmin("删除系统公告", "announcement", id, `删除公告 #${id}`);
+    return ok(res, { id }, "公告已删除");
+  }
+  if (method === "GET" && url.pathname === "/api/admin/member-levels") {
+    ensureCommercialData();
+    return ok(res, { items: db.memberLevels, distribution: memberLevelDistribution() });
+  }
+  if (method === "POST" && url.pathname === "/api/admin/member-levels") {
+    try {
+      const level = upsertMemberLevel(body);
+      await auditAdmin("保存会员等级", "member_level", level.code, `保存会员等级 ${level.name}`);
+      return ok(res, level, "会员等级已保存");
+    } catch (error) {
+      return fail(res, 400, error.message);
+    }
+  }
+  if (method === "GET" && url.pathname === "/api/admin/coupons") {
+    ensureCommercialData();
+    return ok(res, { items: couponStats(), userCoupons: db.userCoupons });
+  }
+  if (method === "POST" && url.pathname === "/api/admin/coupons") {
+    try {
+      const coupon = createCoupon(body);
+      await auditAdmin("新增优惠券", "coupon", coupon.id, `新增优惠券 ${coupon.name}`);
+      return ok(res, coupon, "优惠券已创建");
+    } catch (error) {
+      return fail(res, 400, error.message);
+    }
+  }
+  if (method === "GET" && url.pathname === "/api/admin/tasks") {
+    ensureEngagementData();
+    return ok(res, { items: db.taskRules, userTasks: db.userTasks });
+  }
+  if (method === "POST" && url.pathname === "/api/admin/tasks") {
+    try {
+      const task = upsertTaskRule(body);
+      await auditAdmin("保存任务规则", "task_rule", task.id, `保存任务规则 ${task.title}`);
+      return ok(res, task, "任务规则已保存");
+    } catch (error) {
+      return fail(res, 400, error.message);
+    }
+  }
+  if (method === "GET" && url.pathname === "/api/admin/badges") {
+    ensureEngagementData();
+    return ok(res, { items: db.badges, userBadges: db.userBadges });
+  }
+  if (method === "POST" && url.pathname === "/api/admin/badges") {
+    try {
+      const badge = upsertBadge(body);
+      await auditAdmin("保存勋章", "badge", badge.id, `保存勋章 ${badge.name}`);
+      return ok(res, badge, "勋章已保存");
+    } catch (error) {
+      return fail(res, 400, error.message);
+    }
+  }
+  if (method === "GET" && url.pathname === "/api/admin/invites") {
+    ensureEngagementData();
+    const items = db.inviteRecords.map((item) => ({
+      ...item,
+      inviterName: db.users.find((user) => user.id === item.inviterUserId)?.name || "",
+      inviteeName: db.users.find((user) => user.id === item.inviteeUserId)?.name || ""
+    }));
+    return ok(res, { items, total: items.length, converted: items.filter((item) => item.status !== "pending").length });
+  }
   if (method === "GET" && url.pathname === "/api/admin/payments") {
     return ok(res, adminPaymentRows(url.searchParams.get("status") || "submitted"));
   }

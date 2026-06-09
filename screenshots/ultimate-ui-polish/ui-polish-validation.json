@@ -1,0 +1,610 @@
+[
+  {
+    "label": "home-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "culture-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "books-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "shop-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "reservations-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "community-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "activities-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "cart-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "orders-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "favorites-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "notes-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "messages-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "points-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "gifts-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "profile-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "security-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-workbench-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-business-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-announcements-pc",
+    "width": 1440,
+    "docWidth": 1440,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "home-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "culture-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "books-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "shop-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "reservations-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "community-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "activities-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "cart-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "orders-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "favorites-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "notes-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "messages-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "points-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "gifts-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "profile-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "security-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-workbench-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-business-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-announcements-390",
+    "width": 390,
+    "docWidth": 390,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "home-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "culture-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "books-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "shop-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "reservations-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "community-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "activities-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "cart-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "orders-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "favorites-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "notes-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "messages-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "points-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "gifts-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "profile-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "security-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-workbench-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-business-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-announcements-414",
+    "width": 414,
+    "docWidth": 414,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "home-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "culture-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "books-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "shop-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "reservations-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "community-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "activities-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "cart-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "orders-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "favorites-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "notes-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "messages-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "points-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "gifts-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "profile-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "security-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-workbench-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-business-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  },
+  {
+    "label": "admin-announcements-768",
+    "width": 768,
+    "docWidth": 768,
+    "horizontalOverflow": false,
+    "brokenImages": [],
+    "visibleOverflow": []
+  }
+]

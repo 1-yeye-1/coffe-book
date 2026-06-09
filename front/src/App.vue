@@ -1,12 +1,16 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
+import { request } from "@/api";
 import AppFooter from "@/components/front/AppFooter.vue";
 import AppHeader from "@/components/front/AppHeader.vue";
 import { useCartStore } from "@/stores/cart";
 import { useProductStore } from "@/stores/product";
 import { useSiteStore } from "@/stores/site";
 import { useUserStore } from "@/stores/user";
+import { installImageFallback } from "@/shared/image-fallback";
+
+installImageFallback(window);
 
 const route = useRoute();
 const router = useRouter();
@@ -15,9 +19,11 @@ const productStore = useProductStore();
 const siteStore = useSiteStore();
 const userStore = useUserStore();
 let refreshTimer = null;
+let notificationTimer = null;
+const notificationUnread = ref(0);
 
 const cartCount = computed(() => cartStore.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
-const messageCount = computed(() => userStore.member?.notifications?.length || 0);
+const messageCount = computed(() => notificationUnread.value || userStore.member?.notifications?.length || 0);
 const accountLinks = computed(() => [
   { to: "/cart", label: "购物车", badge: cartCount.value || "" },
   { to: "/orders", label: "我的订单" },
@@ -33,6 +39,7 @@ const accountLinks = computed(() => [
 
 onMounted(async () => {
   refreshVisibleData();
+  refreshUnreadCount();
   if (userStore.isLoggedIn) userStore.fetchMember().catch(() => {
     userStore.logout();
     cartStore.clearCart();
@@ -40,14 +47,19 @@ onMounted(async () => {
   else cartStore.clearCart();
   window.addEventListener("focus", refreshVisibleData);
   refreshTimer = setInterval(refreshVisibleData, 10000);
+  notificationTimer = setInterval(refreshUnreadCount, 30000);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("focus", refreshVisibleData);
   if (refreshTimer) clearInterval(refreshTimer);
+  if (notificationTimer) clearInterval(notificationTimer);
 });
 
-watch(() => route.fullPath, refreshVisibleData);
+watch(() => route.fullPath, () => {
+  refreshVisibleData();
+  refreshUnreadCount();
+});
 
 function refreshVisibleData() {
   const tasks = [productStore.fetchProducts()];
@@ -57,6 +69,19 @@ function refreshVisibleData() {
   if (route.path.startsWith("/community")) tasks.push(siteStore.fetchPosts());
   if (userStore.isLoggedIn) tasks.push(userStore.fetchMember());
   return Promise.allSettled(tasks);
+}
+
+async function refreshUnreadCount() {
+  if (!userStore.isLoggedIn) {
+    notificationUnread.value = 0;
+    return;
+  }
+  try {
+    const data = await request("/api/notifications/unread-count");
+    notificationUnread.value = Number(data?.count || 0);
+  } catch {
+    notificationUnread.value = userStore.member?.notifications?.length || 0;
+  }
 }
 
 function logout() {

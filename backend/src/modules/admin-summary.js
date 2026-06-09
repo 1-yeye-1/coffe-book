@@ -1,5 +1,9 @@
 const { db, incomeData } = require("../shared/data");
 const { getDatabaseOverview, reloadDatabase } = require("../shared/mysql");
+const { couponStats, ensureCommercialData, memberLevelDistribution } = require("./commercial");
+const { ensureEngagementData } = require("./engagement");
+const { businessPayload, operationsV2Payload } = require("./business");
+const { notificationStats } = require("./notifications");
 
 const moduleTableMap = [
   { module: "用户管理", tables: ["users"], fields: "name, phone, email, birthday, level, points, profile_public" },
@@ -11,6 +15,15 @@ const moduleTableMap = [
   { module: "活动管理", tables: ["activities", "activity_applications"], fields: "title, capacity, applied, registration_start, early_start, applications" },
   { module: "社区审核", tables: ["posts", "comments"], fields: "author, title, content, likes, comments.status" },
   { module: "内容管理", tables: ["notices"], fields: "title, summary, date" },
+  { module: "会员等级管理", tables: ["member_levels", "member_growth_logs"], fields: "code, name, min_growth, max_growth, discount_rate, points_multiplier, priority_signup" },
+  { module: "优惠券管理", tables: ["coupons", "user_coupons"], fields: "name, type, value, threshold_amount, valid_from, valid_to, total_quantity, received_quantity, status" },
+  { module: "任务管理", tables: ["task_rules", "user_tasks"], fields: "title, description, reward_points, type, action_key, status, completed_at" },
+  { module: "勋章管理", tables: ["badges", "user_badges"], fields: "name, description, icon, rule, earned_at" },
+  { module: "邀请管理", tables: ["invite_records"], fields: "inviter_user_id, invitee_user_id, invite_code, status, reward_points, reward_coupon_id" },
+  { module: "消息推送管理", tables: ["notification_records"], fields: "user_id, type, title, status, is_read, source, trigger_type, priority" },
+  { module: "系统公告管理", tables: ["announcements", "notification_records"], fields: "title, content, link, pinned, status, created_at" },
+  { module: "商业驾驶舱", tables: ["business_metrics_daily", "orders", "payments", "recommend_records"], fields: "gmv, sales_amount, order_count, active_users, conversion_rate" },
+  { module: "运营驾驶舱 V2", tables: ["business_metrics_daily", "business_kpi_configs", "orders", "activity_applications"], fields: "activity_funnel, user_segment, product_repeat, member_analysis" },
   { module: "购物车记录", tables: ["carts"], fields: "user_key, product_id, quantity, created_at" },
   { module: "实时日志", tables: ["audit_logs"], fields: "actor_type, actor_id, actor_name, action, target_type, target_id, detail, created_at" }
 ];
@@ -112,6 +125,8 @@ function enhancedDashboard() {
 
 async function adminSummary() {
   await reloadDatabase();
+  ensureCommercialData();
+  ensureEngagementData();
   const activityApplications = db.activityApplications.map((application) => {
     const user = db.users.find((item) => item.id === Number(application.userId));
     return {
@@ -149,13 +164,32 @@ async function adminSummary() {
       const user = db.users.find((entry) => String(entry.id) === String(userKey));
       return { userKey, userName: user?.name || "", productName: product?.name || "", ...item };
     })),
+    commercial: {
+      memberLevels: db.memberLevels,
+      levelDistribution: memberLevelDistribution(),
+      coupons: couponStats(),
+      userCoupons: db.userCoupons,
+      growthLogs: db.memberGrowthLogs,
+      taskRules: db.taskRules,
+      userTasks: db.userTasks,
+      badges: db.badges,
+      userBadges: db.userBadges,
+      inviteRecords: db.inviteRecords,
+      browseHistory: db.userBrowseHistory,
+      notifications: db.notificationRecords,
+      notificationStats: notificationStats(),
+      announcements: db.announcements || [],
+      recommendRecords: db.recommendRecords
+    },
     database: {
       overview: await getDatabaseOverview(),
       moduleTableMap,
       syncedAt: new Date().toISOString()
     },
     income: incomeData(),
-    dashboard: enhancedDashboard()
+    dashboard: enhancedDashboard(),
+    business: businessPayload(),
+    operationsV2: operationsV2Payload()
   };
 }
 

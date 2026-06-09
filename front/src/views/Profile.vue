@@ -4,8 +4,12 @@ import { request } from "@/api";
 import DataState from "@/components/DataState.vue";
 import BaseToast from "@/components/front/BaseToast.vue";
 import StatusBadge from "@/components/front/StatusBadge.vue";
+import { useCommercialStore } from "@/stores/commercial";
+import { useEngagementStore } from "@/stores/engagement";
 import { useUserStore } from "@/stores/user";
 
+const commercialStore = useCommercialStore();
+const engagementStore = useEngagementStore();
 const userStore = useUserStore();
 const member = computed(() => userStore.member);
 const loading = ref(false);
@@ -28,6 +32,8 @@ const form = reactive({
 
 const stats = computed(() => member.value?.stats || { favoriteBooks: 0, publishedComments: 0, orderCount: 0 });
 const membership = computed(() => member.value?.membership || {});
+const commercialLevel = computed(() => commercialStore.memberLevel || membership.value);
+const earnedBadges = computed(() => engagementStore.earnedBadges);
 const progressPercent = computed(() => {
   const target = Number(membership.value.target || 1);
   const current = Number(membership.value.current || 0);
@@ -75,7 +81,11 @@ async function loadProfile() {
   loading.value = true;
   error.value = "";
   try {
-    await userStore.fetchMember();
+    await Promise.allSettled([
+      userStore.fetchMember(),
+      commercialStore.fetchMemberLevel(),
+      engagementStore.fetchBadges()
+    ]);
     fillForm(member.value);
   } catch (err) {
     error.value = err.message;
@@ -235,6 +245,20 @@ async function save() {
             </div>
             <div class="mini-progress"><span :style="{ width: `${progressPercent}%` }"></span></div>
             <p class="muted">距离 {{ membership.nextLevel || "下一等级" }} 还需 {{ membership.need || 0 }} 成长值。</p>
+            <div class="badge-card-list">
+              <div class="badge-card-mini">
+                <StatusBadge :label="`${Number((commercialLevel.discountRate || 1) * 10).toFixed(1)} 折`" type="accent" />
+                <span>下单会员折扣</span>
+              </div>
+              <div class="badge-card-mini">
+                <StatusBadge :label="`${commercialLevel.pointsMultiplier || 1} 倍`" type="success" />
+                <span>支付返积分倍率</span>
+              </div>
+              <div class="badge-card-mini">
+                <StatusBadge :label="`优先 ${commercialLevel.activityPriority || 0} 次`" type="warning" />
+                <span>活动优先报名权</span>
+              </div>
+            </div>
           </article>
 
           <article class="card badge-wall-card">
@@ -244,7 +268,12 @@ async function save() {
                 <StatusBadge :label="badge.title" :type="badge.type" />
                 <span>{{ badge.desc }}</span>
               </div>
+              <div v-for="badge in earnedBadges.slice(0, 4)" :key="badge.id" class="badge-card-mini">
+                <StatusBadge :label="badge.name" type="success" />
+                <span>{{ badge.description }}</span>
+              </div>
             </div>
+            <RouterLink class="btn ghost" to="/badges">查看勋章墙</RouterLink>
           </article>
 
           <article class="card profile-interest-card">

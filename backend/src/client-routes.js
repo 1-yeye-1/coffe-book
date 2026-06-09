@@ -22,6 +22,14 @@ const { activityStatus, findActivityById, hasAppliedActivity } = require("./modu
 const { cartSnapshot, getUserCart, setUserCart } = require("./modules/cart");
 const { communityProfile, publicComment, publicPost } = require("./modules/community");
 const { earlySignupQuota, memberData, memberLevels, normalizeMember, pointRewards } = require("./modules/member");
+const {
+  applyCommercialDiscount,
+  autoIssueNewUserCoupon,
+  issueCoupon,
+  listMemberCoupons,
+  listPublicCoupons,
+  markCouponUsed
+} = require("./modules/commercial");
 const { findOrderById, listOrdersForUser, restoreOrderStock, userOwnsOrder } = require("./modules/orders");
 const {
   apiBaseFromRequest,
@@ -35,6 +43,27 @@ const {
 } = require("./modules/payments");
 const { findBookById, findProductById, listBooks, listProducts } = require("./modules/products");
 const { findReservationById, findSeatConflicts, userOwnsReservation } = require("./modules/reservations");
+const {
+  awardInviteFirstOrder,
+  badgePayload,
+  bindInvite,
+  checkInTask,
+  checkInSummary,
+  completeTask,
+  historyForUser,
+  inviteSummary,
+  listTasks,
+  notificationList,
+  recommendations,
+  recordBrowse
+} = require("./modules/engagement");
+const {
+  createNotification,
+  listNotificationsForUser,
+  markAllRead,
+  markRead,
+  unreadCount
+} = require("./modules/notifications");
 const QRCode = require("qrcode");
 
 async function handleFrontApi(req, res, url) {
@@ -65,11 +94,13 @@ async function handleFrontApi(req, res, url) {
   }
   if (method === "GET" && url.pathname.startsWith("/api/products/")) {
     const product = findProductById(url.pathname.split("/").pop());
+    if (product) recordBrowse(currentUser(req), "product", product.id);
     return product ? ok(res, product) : fail(res, 404, "商品不存在");
   }
   if (method === "GET" && url.pathname === "/api/books") return ok(res, listBooks());
   if (method === "GET" && url.pathname.match(/^\/api\/books\/\d+$/)) {
     const book = findBookById(url.pathname.split("/").pop());
+    if (book) recordBrowse(currentUser(req), "book", book.id);
     return book ? ok(res, book) : fail(res, 404, "书籍不存在");
   }
   if (method === "GET" && url.pathname === "/api/seats/status") return ok(res, seatStatus(url.searchParams.get("date") || today(), url.searchParams.get("time") || ""));
@@ -90,6 +121,7 @@ async function handleFrontApi(req, res, url) {
   if (method === "GET" && url.pathname.match(/^\/api\/activities\/\d+$/)) {
     const activity = findActivityById(url.pathname.split("/").pop());
     if (activity && activityStatus(activity) === "draft") return fail(res, 404, "活动不存在");
+    if (activity) recordBrowse(currentUser(req), "activity", activity.id);
     return activity ? ok(res, activity) : fail(res, 404, "活动不存在");
   }
   if (method === "GET" && url.pathname === "/api/posts") {
@@ -109,6 +141,48 @@ async function handleFrontApi(req, res, url) {
   if (method === "GET" && url.pathname === "/api/member") {
     const user = currentUser(req);
     return user ? ok(res, memberData(user)) : fail(res, 401, "请先登录");
+  }
+  if (method === "GET" && url.pathname === "/api/member/level") {
+    const user = currentUser(req);
+    return user ? ok(res, memberData(user).membership) : fail(res, 401, "请先登录");
+  }
+  if (method === "GET" && url.pathname === "/api/coupons") {
+    return ok(res, listPublicCoupons(currentUser(req)));
+  }
+  if (method === "GET" && url.pathname === "/api/member/coupons") {
+    const user = currentUser(req);
+    return user ? ok(res, listMemberCoupons(user)) : fail(res, 401, "请先登录");
+  }
+  if (method === "GET" && url.pathname === "/api/member/tasks") {
+    const user = currentUser(req);
+    return user ? ok(res, { tasks: listTasks(user), checkIn: checkInSummary(user) }) : fail(res, 401, "请先登录");
+  }
+  if (method === "GET" && url.pathname === "/api/member/badges") {
+    const user = currentUser(req);
+    return user ? ok(res, badgePayload(user)) : fail(res, 401, "请先登录");
+  }
+  if (method === "GET" && url.pathname === "/api/member/invite") {
+    const user = currentUser(req);
+    return user ? ok(res, inviteSummary(user, `http://${req.headers.host}`.replace(":4173", ":5173"))) : fail(res, 401, "请先登录");
+  }
+  if (method === "GET" && url.pathname === "/api/member/history") {
+    const user = currentUser(req);
+    return user ? ok(res, historyForUser(user)) : fail(res, 401, "请先登录");
+  }
+  if (method === "GET" && url.pathname === "/api/recommendations") {
+    return ok(res, recommendations(currentUser(req), url.searchParams.get("scene") || "home"));
+  }
+  if (method === "GET" && url.pathname === "/api/notifications/unread-count") {
+    const user = currentUser(req);
+    return user ? ok(res, { count: unreadCount(user) }) : fail(res, 401, "请先登录");
+  }
+  if (method === "GET" && url.pathname === "/api/notifications") {
+    const user = currentUser(req);
+    return user ? ok(res, listNotificationsForUser(user, {
+      category: url.searchParams.get("category") || "all",
+      status: url.searchParams.get("status") || "all",
+      query: url.searchParams.get("q") || ""
+    })) : fail(res, 401, "请先登录");
   }
   if (method === "GET" && url.pathname === "/api/orders") {
     const user = currentUser(req);
@@ -154,6 +228,18 @@ async function handleFrontApi(req, res, url) {
   }
 
   const body = await parseBody(req);
+
+  if (method === "POST" && url.pathname === "/api/notifications/read") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录");
+    return ok(res, markRead(user, body.ids || body.id || []), "消息已读");
+  }
+
+  if (method === "POST" && url.pathname === "/api/notifications/read-all") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录");
+    return ok(res, markAllRead(user, { category: body.category || "all" }), "全部消息已读");
+  }
 
   if (method === "POST" && url.pathname === "/api/payments/create") {
     const user = currentUser(req);
@@ -260,6 +346,10 @@ async function handleFrontApi(req, res, url) {
     };
     await persistUser(user);
     db.users.push(user);
+    const newcomerCoupon = autoIssueNewUserCoupon(user);
+    if (newcomerCoupon) {
+      await persistUser(user);
+    }
     await auditActivity("注册账号", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "user", targetId: user.id, detail: `新会员 ${user.name} 完成注册` });
     return ok(res, { user: publicUser(user), token: sign({ id: user.id, type: "user" }) }, "注册成功");
   }
@@ -332,6 +422,7 @@ async function handleFrontApi(req, res, url) {
         await persistComment(post.id, comment);
       }
     }
+    completeTask(user, "complete_profile");
     await auditActivity("更新个人资料", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "user", targetId: user.id, detail: "更新了个人资料" });
     return ok(res, publicUser(user), "个人资料已保存");
   }
@@ -367,21 +458,44 @@ async function handleFrontApi(req, res, url) {
     return ok(res, memberData(user), "内容已保存");
   }
 
+  if (method === "POST" && url.pathname === "/api/member/tasks/check-in") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录");
+    try {
+      const result = checkInTask(user);
+      normalizeMember(user);
+      await persistUser(user);
+      await auditActivity("每日签到", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "user", targetId: user.id, detail: `连续签到 ${result.checkIn.streak} 天` });
+      return ok(res, { ...result, member: memberData(user) }, "签到成功");
+    } catch (error) {
+      return fail(res, 409, error.message);
+    }
+  }
+
+  if (method === "POST" && url.pathname === "/api/invite/bind") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录");
+    try {
+      const record = bindInvite(user, body.inviteCode);
+      await auditActivity("绑定邀请关系", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "invite", targetId: record.id, detail: `绑定邀请码 ${record.inviteCode}` });
+      return ok(res, record, "邀请关系已绑定");
+    } catch (error) {
+      return fail(res, 409, error.message);
+    }
+  }
+
   if (method === "POST" && url.pathname === "/api/member/check-in") {
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录");
-    normalizeMember(user);
-    if (user.lastCheckIn === today()) return fail(res, 409, "今天已经签到过了");
-    const level = memberLevels.find((item) => item.name === user.level) || memberLevels[0];
-    const pointGain = level.name === "钻石会员" ? 20 : level.name === "黄金会员" ? 15 : 10;
-    user.points += pointGain;
-    user.levelProgress += 35;
-    user.lastCheckIn = today();
-    normalizeMember(user);
-    user.notifications = [`签到成功，获得 ${pointGain} 积分和 35 等级度`, ...(user.notifications || [])].slice(0, 30);
-    await persistUser(user);
-    await auditActivity("每日签到", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "user", targetId: user.id, detail: `完成每日签到，获得 ${pointGain} 积分` });
-    return ok(res, memberData(user), "签到成功");
+    try {
+      checkInTask(user);
+      normalizeMember(user);
+      await persistUser(user);
+      await auditActivity("每日签到", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "user", targetId: user.id, detail: "完成每日签到" });
+      return ok(res, memberData(user), "签到成功");
+    } catch (error) {
+      return fail(res, 409, error.message);
+    }
   }
 
   if (method === "POST" && url.pathname === "/api/member/redeem") {
@@ -402,6 +516,7 @@ async function handleFrontApi(req, res, url) {
       redeemedAt: new Date().toISOString(),
       usedAt: ""
     });
+    completeTask(user, "first_redeem_gift");
     user.notifications = [`已兑换：${reward.title}`, ...(user.notifications || [])].slice(0, 30);
     await persistUser(user);
     await auditActivity("积分兑换", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "reward", targetId: reward.id, detail: `使用 ${reward.cost} 积分兑换 ${reward.title}` });
@@ -481,6 +596,18 @@ async function handleFrontApi(req, res, url) {
     return ok(res, [], "购物车已清空");
   }
 
+  if (method === "POST" && url.pathname === "/api/coupons/receive") {
+    const user = currentUser(req);
+    if (!user) return fail(res, 401, "请先登录后再领取优惠券");
+    try {
+      const coupon = issueCoupon(user, body.couponId, "manual");
+      await persistUser(user);
+      return ok(res, coupon, "优惠券领取成功");
+    } catch (error) {
+      return fail(res, 409, error.message);
+    }
+  }
+
   if (method === "POST" && url.pathname === "/api/orders") {
     const user = currentUser(req);
     if (!user) return fail(res, 401, "请先登录后再提交订单");
@@ -509,13 +636,31 @@ async function handleFrontApi(req, res, url) {
       const product = findProductById(item.productId);
       product.stock -= item.quantity;
     }
-    const total = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    let commercial;
+    try {
+      commercial = applyCommercialDiscount(user, subtotal, body.couponId || body.coupon);
+    } catch (error) {
+      for (const item of orderItems) {
+        const product = findProductById(item.productId);
+        if (product) product.stock += item.quantity;
+      }
+      return fail(res, 409, error.message);
+    }
+    const total = commercial.payAmount;
     const order = {
       id: nextId(db.orders),
       userId: user.id,
       userName: user.name,
       items: orderItems,
       total,
+      subtotal: commercial.subtotal,
+      couponDiscount: commercial.couponDiscount,
+      memberDiscount: commercial.memberDiscount,
+      discountAmount: commercial.discountAmount,
+      couponName: commercial.couponName,
+      memberLevel: commercial.membership.level,
+      memberDiscountRate: commercial.membership.discountRate,
       status: "pending_payment",
       paymentMethod: "",
       paidAt: "",
@@ -529,6 +674,20 @@ async function handleFrontApi(req, res, url) {
       earnedProgress: 0
     };
     db.orders.push(order);
+    createNotification({
+      user,
+      type: "order",
+      title: "订单提醒",
+      content: `订单 #${order.id} 已创建，请在支付页完成付款`,
+      link: `/orders/${order.id}`,
+      source: "order",
+      triggerType: "order_created",
+      triggerData: { orderId: order.id, amount: order.total },
+      priority: "high"
+    });
+    markCouponUsed(commercial.userCouponId, order.id);
+    completeTask(user, "first_order");
+    awardInviteFirstOrder(user);
     for (const item of orderItems) {
       const product = findProductById(item.productId);
       if (product) await persistProduct(product);
@@ -571,6 +730,17 @@ async function handleFrontApi(req, res, url) {
       const created = await createPayment(order, body.method || body.paymentMethod, apiBaseFromRequest(req));
       const payment = latestPaymentForOrder(order.id);
       await submitPayment(payment, order);
+      createNotification({
+        user,
+        type: "payment",
+        title: "支付提醒",
+        content: `订单 #${order.id} 已提交付款信息，等待后台确认`,
+        link: `/orders/${order.id}`,
+        source: "payment",
+        triggerType: "payment_submitted",
+        triggerData: { orderId: order.id, paymentId: payment?.id || created?.id },
+        priority: "high"
+      });
       await auditActivity("提交付款审核", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "order", targetId: order.id, detail: `订单 #${order.id} 已提交付款审核，支付方式：${created.method}` });
       return ok(res, order, "付款信息已提交，请等待后台审核");
     } catch (error) {
@@ -613,6 +783,20 @@ async function handleFrontApi(req, res, url) {
       status: "已预约"
     };
     db.reservations.push(reservation);
+    if (user) completeTask(user, "first_reservation");
+    if (user) {
+      createNotification({
+        user,
+        type: "reservation",
+        title: "预约提醒",
+        content: `${reservation.date} ${reservation.time} 的座位预约已成功`,
+        link: "/my-reservations",
+        source: "reservation",
+        triggerType: "reservation_created",
+        triggerData: { reservationId: reservation.id, date: reservation.date, time: reservation.time },
+        priority: "high"
+      });
+    }
     await persistReservation(reservation);
     await auditActivity("预约座位", { actorType: user ? "user" : "guest", actorId: user?.id || 0, actorName: user?.name || phone, targetType: "reservation", targetId: reservation.id, detail: `完成 ${reservation.seatId} 座位预约` });
     return ok(res, reservation, "预约成功");
@@ -659,6 +843,20 @@ async function handleFrontApi(req, res, url) {
     const application = { id: nextId(db.activityApplications), activityId: activity.id, userId: user?.id || 0, phone, people, kind, createdAt: new Date().toISOString() };
     db.activityApplications.push(application);
     activity.applied += people;
+    if (user) completeTask(user, "first_activity_signup");
+    if (user) {
+      createNotification({
+        user,
+        type: "activity",
+        title: "活动提醒",
+        content: `${activity.title} 报名成功，活动开始前请留意提醒`,
+        link: `/activities/${activity.id}`,
+        source: "activity",
+        triggerType: "activity_signup",
+        triggerData: { activityId: activity.id, applicationId: application.id, people },
+        priority: kind === "early" ? "high" : "normal"
+      });
+    }
     await persistActivity(activity);
     await persistActivityApplication(application);
     await auditActivity("活动报名", { actorType: user ? "user" : "guest", actorId: user?.id || 0, actorName: user?.name || phone, targetType: "activity", targetId: activity.id, detail: `${activity.title} 新增 ${people} 人报名` });
@@ -703,6 +901,7 @@ async function handleFrontApi(req, res, url) {
     const allComments = db.posts.flatMap((item) => item.comments);
     const comment = { id: nextId(allComments), userId: user.id, user: user.name, avatar: user.avatar || "", content: String(body.content).trim(), likes: 0, likedBy: [], status: "pending" };
     post.comments.push(comment);
+    completeTask(user, "comment_post");
     await persistComment(post.id, comment);
     await auditActivity("提交评论", { actorType: "user", actorId: user.id, actorName: user.name, targetType: "comment", targetId: comment.id, detail: `在动态 #${post.id} 下提交待审核评论` });
     return ok(res, publicPost(post, user), "评论已提交，审核通过后展示");
@@ -718,6 +917,7 @@ async function handleFrontApi(req, res, url) {
     if (post.likedBy.includes(user.id)) return fail(res, 409, "您已经点过赞了");
     post.likedBy.push(user.id);
     post.likes = post.likedBy.length;
+    completeTask(user, "like_post");
     await persistPost(post);
     return ok(res, publicPost(post, user), "点赞成功");
   }

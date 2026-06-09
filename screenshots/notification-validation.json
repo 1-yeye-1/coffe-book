@@ -1,0 +1,47 @@
+{
+  "shots": {
+    "pcNotification": "D:\\咖啡书屋\\screenshots\\notification-center-pc.png",
+    "mobileNotification": "D:\\咖啡书屋\\screenshots\\notification-center-mobile.png",
+    "adminNotification": "D:\\咖啡书屋\\screenshots\\admin-notification-management.png",
+    "adminAnnouncement": "D:\\咖啡书屋\\screenshots\\admin-announcement-management.png"
+  },
+  "findings": [
+    {
+      "label": "PC????",
+      "brokenImages": [],
+      "horizontalOverflow": false,
+      "width": 1366,
+      "scrollWidth": 1366,
+      "bodyClientWidth": 1366,
+      "bodyScrollWidth": 1366
+    },
+    {
+      "label": "Mobile????",
+      "brokenImages": [],
+      "horizontalOverflow": false,
+      "width": 390,
+      "scrollWidth": 390,
+      "bodyClientWidth": 390,
+      "bodyScrollWidth": 390
+    },
+    {
+      "label": "??????",
+      "brokenImages": [],
+      "horizontalOverflow": false,
+      "width": 1366,
+      "scrollWidth": 1366,
+      "bodyClientWidth": 1366,
+      "bodyScrollWidth": 1366
+    },
+    {
+      "label": "??????",
+      "brokenImages": [],
+      "horizontalOverflow": false,
+      "width": 1366,
+      "scrollWidth": 1366,
+      "bodyClientWidth": 1366,
+      "bodyScrollWidth": 1366
+    }
+  ],
+  "logs": []
+}

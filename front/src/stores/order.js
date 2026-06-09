@@ -192,7 +192,12 @@ export const useOrderStore = defineStore("order", {
       const remote = await request("/api/orders", {
         method: "POST",
         body: {
-          items: payload.items.map((item) => ({ productId: item.productId, quantity: item.quantity }))
+          items: payload.items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+          couponId: payload.couponId || payload.coupon || "",
+          contactName: payload.contactName || "",
+          phone: payload.phone || "",
+          deliveryType: payload.deliveryType || "",
+          remark: payload.remark || ""
         }
       });
 

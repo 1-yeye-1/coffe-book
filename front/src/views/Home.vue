@@ -7,8 +7,10 @@ import DataState from "@/components/DataState.vue";
 import EventCard from "@/components/front/EventCard.vue";
 import ProductCard from "@/components/front/ProductCard.vue";
 import StatusBadge from "@/components/front/StatusBadge.vue";
+import { useEngagementStore } from "@/stores/engagement";
 import { useSiteStore } from "@/stores/site";
 
+const engagementStore = useEngagementStore();
 const siteStore = useSiteStore();
 const loading = ref(false);
 const error = ref("");
@@ -27,6 +29,10 @@ const events = computed(() => {
   return (activityItems.length ? activityItems : home.value?.recommendations || []).slice(0, 3);
 });
 const communityItems = computed(() => (home.value?.news || []).slice(0, 3));
+const recentHistory = computed(() => engagementStore.history.slice(0, 4));
+const recommendProducts = computed(() => (engagementStore.recommendations?.products || []).slice(0, 3));
+const recommendBooks = computed(() => (engagementStore.recommendations?.books || []).slice(0, 3));
+const recommendActivities = computed(() => (engagementStore.recommendations?.activities || []).slice(0, 3));
 
 const reviews = [
   { name: "城市读者", role: "黄金会员", text: "预约座位、买咖啡和参加夜读会都在一个系统里完成，展示时很有完整产品感。" },
@@ -42,6 +48,10 @@ const memberTiers = [
 
 onMounted(async () => {
   await loadHome();
+  await Promise.allSettled([
+    engagementStore.fetchRecommendations("home"),
+    localStorage.getItem("coffee_token") ? engagementStore.fetchHistory() : Promise.resolve()
+  ]);
   await nextTick();
   runAnimations();
 });
@@ -166,6 +176,33 @@ function runAnimations() {
         </div>
         <small>Coffee Book Data</small>
       </article>
+    </section>
+
+    <section v-if="recentHistory.length || recommendProducts.length || recommendBooks.length || recommendActivities.length" class="home-section-pro" data-reveal>
+      <div class="home-section-pro__head">
+        <div>
+          <span class="section-kicker">For You</span>
+          <h2>最近浏览与猜你喜欢</h2>
+          <p>基于浏览记录、收藏、购买和热门排行生成轻量推荐。</p>
+        </div>
+        <RouterLink class="btn secondary" to="/tasks">去做任务</RouterLink>
+      </div>
+      <div v-if="recentHistory.length" class="home-channel-grid">
+        <article v-for="item in recentHistory" :key="item.id">
+          <span>{{ item.targetType }}</span>
+          <strong>{{ item.target?.title || item.target?.name }}</strong>
+          <p>{{ item.target?.summary || item.target?.description || item.target?.content || "继续查看最近浏览内容" }}</p>
+        </article>
+      </div>
+      <div class="product-show-grid">
+        <ProductCard v-for="item in recommendProducts" :key="`rp-${item.id}`" :item="item" :to="`/shop/${item.id}`" cta="猜你喜欢" />
+      </div>
+      <div class="book-show-grid">
+        <BookCard v-for="item in recommendBooks" :key="`rb-${item.id}`" :book="item" />
+      </div>
+      <div class="event-show-grid">
+        <EventCard v-for="item in recommendActivities" :key="`ra-${item.id}`" :event="item" :to="`/activities/${item.id}`" />
+      </div>
     </section>
 
     <section class="home-channel-grid" data-reveal>

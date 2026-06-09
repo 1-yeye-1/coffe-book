@@ -1,6 +1,8 @@
 const { db } = require("../shared/data");
 const { persistOrder, persistPayment, persistUser } = require("../shared/mysql");
 const { nextId } = require("../shared/validators");
+const { addGrowthLog, commercialMembershipData, syncUserLevel } = require("./commercial");
+const { createNotification } = require("./notifications");
 
 const PAYMENT_EXPIRES_IN_MS = 15 * 60 * 1000;
 
@@ -203,11 +205,48 @@ async function cancelPayment(payment, order) {
 async function awardOrderBenefits(order) {
   const user = db.users.find((item) => item.id === order.userId);
   if (!user || order.paidAt) return;
-  order.earnedPoints = Math.max(1, Math.floor(Number(order.total || 0)));
+  const membership = commercialMembershipData(user);
+  const previousLevel = user.level;
+  order.earnedPoints = Math.max(1, Math.floor(Number(order.total || 0) * Number(membership.pointsMultiplier || 1)));
   order.earnedProgress = Math.max(1, Math.ceil(Number(order.total || 0) * 0.5));
   user.points = Number(user.points || 0) + order.earnedPoints;
   user.levelProgress = Number(user.levelProgress || 0) + order.earnedProgress;
-  user.notifications = [`订单 #${order.id} 已确认收款，获得 ${order.earnedPoints} 积分和 ${order.earnedProgress} 等级进度`, ...(user.notifications || [])].slice(0, 30);
+  addGrowthLog(user, order.earnedProgress, "order_paid", order.id);
+  syncUserLevel(user);
+  createNotification({
+    user,
+    type: "payment",
+    title: "支付提醒",
+    content: `订单 #${order.id} 已确认收款`,
+    link: `/orders/${order.id}`,
+    source: "payment",
+    triggerType: "payment_confirmed",
+    triggerData: { orderId: order.id, amount: order.total },
+    priority: "high"
+  });
+  createNotification({
+    user,
+    type: "points",
+    title: "积分到账",
+    content: `获得 ${order.earnedPoints} 积分和 ${order.earnedProgress} 成长值`,
+    link: "/points",
+    source: "order",
+    triggerType: "order_paid_reward",
+    triggerData: { orderId: order.id, points: order.earnedPoints, growth: order.earnedProgress }
+  });
+  if (previousLevel && previousLevel !== user.level) {
+    createNotification({
+      user,
+      type: "member_upgrade",
+      title: "会员升级提醒",
+      content: `会员等级已由 ${previousLevel} 升级为 ${user.level}，新权益已生效`,
+      link: "/points",
+      source: "member",
+      triggerType: "member_level_upgrade",
+      triggerData: { orderId: order.id, from: previousLevel, to: user.level },
+      priority: "high"
+    });
+  }
   await persistUser(user);
 }
 

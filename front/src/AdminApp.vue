@@ -14,6 +14,9 @@ import BaseFormItem from "@/components/BaseFormItem.vue";
 import BaseModal from "@/components/BaseModal.vue";
 import BaseTable from "@/components/BaseTable.vue";
 import { adminRequest } from "@/api";
+import { installImageFallback } from "@/shared/image-fallback";
+
+installImageFallback(window);
 
 const adminUser = ref(JSON.parse(localStorage.getItem("coffee_admin_user") || "null"));
 function initialActivePage() {
@@ -60,6 +63,15 @@ const navItems = [
   ["activities", "活动管理"],
   ["community", "社区审核"],
   ["content", "内容管理"],
+  ["memberLevels", "会员等级管理"],
+  ["coupons", "优惠券管理"],
+  ["tasks", "任务管理"],
+  ["badges", "勋章管理"],
+  ["invites", "邀请管理"],
+  ["notificationPush", "消息推送管理"],
+  ["announcements", "系统公告管理"],
+  ["business", "商业驾驶舱"],
+  ["operationsV2", "运营驾驶舱 V2"],
   ["income", "财务中心"],
   ["dashboard", "运营驾驶舱"],
   ["permissions", "权限管理"],
@@ -81,7 +93,19 @@ const rows = computed(() => ({
   databaseOverview: summary.value?.database?.overview || [],
   moduleTableMap: summary.value?.database?.moduleTableMap || [],
   posts: summary.value?.posts || [],
-  notices: summary.value?.notices || []
+  notices: summary.value?.notices || [],
+  memberLevels: summary.value?.commercial?.memberLevels || [],
+  coupons: summary.value?.commercial?.coupons || [],
+  levelDistribution: summary.value?.commercial?.levelDistribution || [],
+  taskRules: summary.value?.commercial?.taskRules || [],
+  userTasks: summary.value?.commercial?.userTasks || [],
+  badges: summary.value?.commercial?.badges || [],
+  userBadges: summary.value?.commercial?.userBadges || [],
+  inviteRecords: summary.value?.commercial?.inviteRecords || [],
+  notificationRecords: summary.value?.commercial?.notifications || [],
+  announcements: summary.value?.commercial?.announcements || [],
+  businessSnapshots: summary.value?.business?.snapshots || [],
+  kpiConfigs: summary.value?.operationsV2?.kpiConfigs || []
 }));
 const comments = computed(() => rows.value.posts.flatMap((post) => (post.comments || []).map((comment) => ({ ...comment, postId: post.id, postTitle: post.title }))));
 const tableKeyByModule = {
@@ -95,6 +119,15 @@ const tableKeyByModule = {
   activities: "activities",
   community: "posts",
   content: "notices",
+  memberLevels: "memberLevels",
+  coupons: "coupons",
+  tasks: "taskRules",
+  badges: "badges",
+  invites: "inviteRecords",
+  notificationPush: "notificationRecords",
+  announcements: "announcements",
+  business: "businessSnapshots",
+  operationsV2: "kpiConfigs",
   database: "databaseOverview"
 };
 const activeTableKey = computed(() => tableKeyByModule[active.value] || "");
@@ -173,11 +206,22 @@ const activeNavTitle = computed(() => navItems.find(([key]) => key === active.va
 const activeSubtitle = computed(() => ({
   workbench: "今日收入、订单、预约、活动和社区运营状态总览。",
   content: "公告、推荐内容和社区内容的运营管理视图。",
+  business: "GMV、收入、用户、活动、预约和推荐转化的商业运营驾驶舱。",
+  operationsV2: "活动转化、用户分层、商品复购和会员消费占比的运营分析中心。",
   income: "收入趋势、来源占比和财务明细集中展示。",
   dashboard: "用户、收入、商品、书籍、活动、预约与社区的综合运营驾驶舱。",
   permissions: "角色、菜单、操作权限和管理员成员的前端配置视图。",
   settings: "网站配置、系统配置、管理员配置、存储状态和系统信息。"
 })[active.value] || "独立后台页面，复用现有后台接口和数据库结构。");
+const notificationStatsAdmin = computed(() => summary.value?.commercial?.notificationStats || {
+  total: rows.value.notificationRecords.length,
+  read: rows.value.notificationRecords.filter((item) => item.isRead || item.status === "read").length,
+  unread: rows.value.notificationRecords.filter((item) => !(item.isRead || item.status === "read")).length,
+  readRate: 0,
+  clickRate: 0,
+  conversionRate: 0,
+  byType: []
+});
 const workbenchStats = computed(() => {
   const todayIncome = dashboard.value.metrics?.find((item) => item.label === "今日收入")?.value || money(0);
   const activityApplied = rows.value.activities.reduce((sum, item) => sum + Number(item.applied || 0), 0);
@@ -330,6 +374,42 @@ const financeDetails = computed(() => [
     createdAt: item.createdAt || "-"
   }))
 ]);
+
+const business = computed(() => summary.value?.business || {});
+const businessOverview = computed(() => business.value.overview || {});
+const businessTrends = computed(() => business.value.trends || []);
+const businessFunnel = computed(() => business.value.funnel || { order: [], activity: [] });
+const businessMembers = computed(() => business.value.members || { distribution: [], highValueUsers: [] });
+const businessRecommendations = computed(() => business.value.recommendations || {});
+const businessRankings = computed(() => business.value.rankings || { products: [], books: [], activities: [] });
+const businessStats = computed(() => [
+  { label: "GMV", value: money(businessOverview.value.gmv), note: "订单创建总额", tone: "gold" },
+  { label: "今日收入", value: money(businessOverview.value.todayIncome), note: "今日已支付订单", tone: "success" },
+  { label: "本周收入", value: money(businessOverview.value.weekIncome), note: "自然周累计", tone: "primary" },
+  { label: "本月收入", value: money(businessOverview.value.monthIncome), note: "当月已支付订单", tone: "gold" },
+  { label: "订单数", value: businessOverview.value.orderCount || 0, note: `支付转化率 ${businessOverview.value.paymentConversionRate || 0}%`, tone: "primary" },
+  { label: "客单价", value: money(businessOverview.value.averageOrderValue), note: `复购率 ${businessOverview.value.repurchaseRate || 0}%`, tone: "success" },
+  { label: "DAU / WAU / MAU", value: `${businessOverview.value.dau || 0}/${businessOverview.value.wau || 0}/${businessOverview.value.mau || 0}`, note: `活跃用户 ${businessOverview.value.activeUsers || 0}`, tone: "warning" },
+  { label: "推荐转化", value: `${businessOverview.value.recommendationConversionRate || 0}%`, note: `曝光 ${businessOverview.value.recommendationExposure || 0} / 点击 ${businessOverview.value.recommendationClicks || 0}`, tone: "primary" }
+]);
+
+const operationsV2 = computed(() => summary.value?.operationsV2 || {});
+const operationsActivityFunnel = computed(() => operationsV2.value.activityFunnel || { steps: [], activities: [] });
+const operationsUserSegmentation = computed(() => operationsV2.value.userSegmentation || { segments: [], users: [] });
+const operationsProductRepeat = computed(() => operationsV2.value.productRepeat || { summary: {}, products: [], trend: [] });
+const operationsMemberAnalysis = computed(() => operationsV2.value.memberAnalysis || { levels: [], kpiConfigs: [] });
+const operationsKpiConfigs = computed(() => operationsV2.value.kpiConfigs || []);
+const operationsStats = computed(() => {
+  const activity = operationsActivityFunnel.value.steps || [];
+  const productSummary = operationsProductRepeat.value.summary || {};
+  const memberLevels = operationsMemberAnalysis.value.levels || [];
+  return [
+    { label: "活动总转化", value: `${activity.at(-1)?.totalRate || 0}%`, note: "曝光到复购", tone: "gold" },
+    { label: "高价值用户", value: operationsUserSegmentation.value.segments?.find((item) => item.name === "高价值用户")?.count || 0, note: "消费/活跃综合分层", tone: "success" },
+    { label: "商品复购率", value: `${productSummary.repeatRate || 0}%`, note: `复购用户 ${productSummary.repeatBuyerCount || 0}`, tone: "primary" },
+    { label: "会员消费额", value: money(operationsMemberAnalysis.value.totalPaidAmount), note: `${memberLevels.length} 个等级`, tone: "warning" }
+  ];
+});
 
 const cockpitStats = computed(() => [
   { label: "用户数", value: rows.value.users.length, note: "会员账户", tone: "primary" },
@@ -624,6 +704,69 @@ const userFields = (item = {}) => [
   { name: "coffeePreference", label: "喜欢的咖啡类型", value: item.coffeePreference || "" },
   { name: "bookPreference", label: "喜欢的书籍分类", value: item.bookPreference || "" },
   { name: "address", label: "收货地址", value: item.address || "", type: "textarea" }
+];
+
+const memberLevelFields = (item = {}) => [
+  { name: "code", label: "等级编码", value: item.code || "LV1" },
+  { name: "name", label: "等级名称", value: item.name || "" },
+  { name: "minGrowth", label: "成长值下限", value: item.minGrowth || 0, type: "number" },
+  { name: "maxGrowth", label: "成长值上限", value: item.maxGrowth ?? "", type: "number" },
+  { name: "discountRate", label: "折扣系数", value: item.discountRate || 1, type: "number", min: 0, step: "0.01" },
+  { name: "pointsMultiplier", label: "积分倍率", value: item.pointsMultiplier || 1, type: "number", min: 1, step: "0.1" },
+  { name: "prioritySignup", label: "优先报名次数", value: item.prioritySignup || 0, type: "number" },
+  { name: "benefits", label: "权益说明", value: (item.benefits || []).join("，"), type: "textarea" }
+];
+
+const couponFields = (item = {}) => [
+  { name: "name", label: "优惠券名称", value: item.name || "" },
+  { name: "type", label: "类型", value: item.type || "full_reduction", type: "select", options: [["newcomer", "新人券"], ["full_reduction", "满减券"], ["discount", "折扣券"], ["birthday", "生日券"], ["activity", "活动券"], ["member_exclusive", "会员专属券"]] },
+  { name: "value", label: "面额/折扣", value: item.value || 0, type: "number", min: 0, step: "0.01" },
+  { name: "threshold", label: "使用门槛", value: item.threshold || 0, type: "number", min: 0, step: "0.01" },
+  { name: "validFrom", label: "开始日期", value: item.validFrom || "2026-01-01", type: "date" },
+  { name: "validTo", label: "结束日期", value: item.validTo || "2026-12-31", type: "date" },
+  { name: "totalQuantity", label: "发放数量", value: item.totalQuantity || 100, type: "number" },
+  { name: "scope", label: "使用范围", value: item.scope || "all", type: "select", options: [["all", "全场"], ["shop", "商城"], ["activity", "活动"], ["member", "会员专属"]] },
+  { name: "status", label: "状态", value: item.status || "active", type: "select", options: [["active", "启用"], ["disabled", "停用"]] },
+  { name: "minLevelCode", label: "最低会员等级", value: item.minLevelCode || "" }
+];
+
+const taskRuleFields = (item = {}) => [
+  { name: "id", label: "任务编号", value: item.id || "", type: "number" },
+  { name: "title", label: "任务标题", value: item.title || "" },
+  { name: "description", label: "任务描述", value: item.description || "", type: "textarea" },
+  { name: "rewardPoints", label: "奖励积分", value: item.rewardPoints || 0, type: "number" },
+  { name: "type", label: "任务类型", value: item.type || "daily", type: "select", options: [["daily", "每日任务"], ["growth", "成长任务"]] },
+  { name: "actionKey", label: "动作标识", value: item.actionKey || "" },
+  { name: "status", label: "状态", value: item.status || "active", type: "select", options: [["active", "启用"], ["disabled", "停用"]] }
+];
+
+const badgeFields = (item = {}) => [
+  { name: "id", label: "勋章编号", value: item.id || "", type: "number" },
+  { name: "code", label: "勋章编码", value: item.code || "" },
+  { name: "name", label: "勋章名称", value: item.name || "" },
+  { name: "description", label: "勋章描述", value: item.description || "", type: "textarea" },
+  { name: "icon", label: "图标文字", value: item.icon || "章" },
+  { name: "rule", label: "获得规则", value: item.rule || "" },
+  { name: "status", label: "状态", value: item.status || "active", type: "select", options: [["active", "启用"], ["disabled", "停用"]] }
+];
+
+const notificationPushFields = () => [
+  { name: "title", label: "消息标题", value: "" },
+  { name: "content", label: "消息内容", value: "", type: "textarea" },
+  { name: "type", label: "消息类型", value: "system", type: "select", options: [["system", "系统"], ["activity", "活动"], ["order", "订单"], ["reservation", "预约"], ["task", "任务"], ["coupon", "优惠券"], ["points", "积分"], ["badge", "勋章"], ["invite", "邀请"], ["recommend", "推荐"]] },
+  { name: "targetMode", label: "推送对象", value: "all", type: "select", options: [["all", "全体用户"], ["level", "指定等级"], ["active", "活跃用户"], ["member", "指定会员"]] },
+  { name: "level", label: "会员等级关键词", value: "" },
+  { name: "userId", label: "指定会员ID", value: "", type: "number" },
+  { name: "priority", label: "优先级", value: "normal", type: "select", options: [["normal", "普通"], ["high", "高优先级"]] },
+  { name: "link", label: "跳转链接", value: "/notifications" }
+];
+
+const announcementFields = (item = {}) => [
+  { name: "title", label: "公告标题", value: item.title || "" },
+  { name: "content", label: "公告内容", value: item.content || "", type: "textarea" },
+  { name: "link", label: "跳转链接", value: item.link || "/notifications" },
+  { name: "pinned", label: "是否置顶", value: item.pinned ? "true" : "false", type: "select", options: [["false", "否"], ["true", "是"]] },
+  { name: "status", label: "状态", value: item.status || "published", type: "select", options: [["published", "发布"], ["draft", "草稿"]] }
 ];
 
 const productFields = (item = {}) => [
@@ -1494,6 +1637,439 @@ function adminRows(key) {
                 <tr v-if="!adminRows('notices').length"><td colspan="5"><div class="admin-empty-state">暂无公告内容</div></td></tr>
               </tbody>
             </table>
+          </div>
+        </section>
+
+        <section v-if="active === 'memberLevels'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('新增/更新会员等级', '/api/admin/member-levels', 'POST', memberLevelFields())">新增等级</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard label="等级数量" :value="rows.memberLevels.length" note="member_levels 配置" tone="primary" />
+            <AdminStatCard label="会员覆盖" :value="rows.levelDistribution.reduce((sum, item) => sum + Number(item.count || 0), 0)" note="按成长值实时归档" tone="success" />
+            <AdminStatCard label="最高倍率" :value="`${Math.max(...rows.memberLevels.map((item) => Number(item.pointsMultiplier || 1)), 1)} 倍`" note="支付确认后返积分" tone="gold" />
+          </div>
+          <div class="card admin-table-card">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>等级</th>
+                  <th>成长值范围</th>
+                  <th>折扣</th>
+                  <th>积分倍率</th>
+                  <th>优先报名</th>
+                  <th>权益</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="level in rows.memberLevels" :key="level.code">
+                  <td><strong>{{ level.name }}</strong><small>{{ level.code }}</small></td>
+                  <td>{{ level.minGrowth }} - {{ level.maxGrowth ?? '∞' }}</td>
+                  <td>{{ Number(level.discountRate * 10).toFixed(1) }} 折</td>
+                  <td>{{ level.pointsMultiplier }} 倍</td>
+                  <td>{{ level.prioritySignup }} 次</td>
+                  <td>{{ (level.benefits || []).slice(0, 3).join(' / ') }}</td>
+                  <td><button class="btn ghost" type="button" @click="openModal('编辑会员等级', '/api/admin/member-levels', 'POST', memberLevelFields(level))">编辑</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="active === 'coupons'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('创建优惠券', '/api/admin/coupons', 'POST', couponFields())">创建优惠券</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard label="优惠券数量" :value="rows.coupons.length" note="当前券模板" tone="primary" />
+            <AdminStatCard label="已领取" :value="rows.coupons.reduce((sum, item) => sum + Number(item.receivedQuantity || 0), 0)" note="user_coupons 记录" tone="success" />
+            <AdminStatCard label="已核销" :value="rows.coupons.reduce((sum, item) => sum + Number(item.usedQuantity || 0), 0)" note="订单使用统计" tone="gold" />
+          </div>
+          <div class="card admin-table-card">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>优惠券</th>
+                  <th>类型</th>
+                  <th>面额</th>
+                  <th>门槛</th>
+                  <th>有效期</th>
+                  <th>领取/核销</th>
+                  <th>转化率</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="coupon in rows.coupons" :key="coupon.id">
+                  <td><strong>{{ coupon.name }}</strong><small>{{ coupon.scope }}</small></td>
+                  <td>{{ coupon.type }}</td>
+                  <td>{{ coupon.type === 'member_exclusive' && Number(coupon.value) < 1 ? `${Number(coupon.value * 10).toFixed(1)}折` : `￥${coupon.value}` }}</td>
+                  <td>满 {{ coupon.threshold }} 可用</td>
+                  <td>{{ coupon.validFrom }} 至 {{ coupon.validTo }}</td>
+                  <td>{{ coupon.receivedQuantity || 0 }} / {{ coupon.usedQuantity || 0 }}</td>
+                  <td>{{ coupon.conversionRate || 0 }}%</td>
+                  <td><AdminStatusBadge :label="coupon.status === 'active' ? '启用' : '停用'" :type="coupon.status === 'active' ? 'success' : 'warning'" /></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="active === 'tasks'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('创建任务规则', '/api/admin/tasks', 'POST', taskRuleFields())">创建任务</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard label="任务规则" :value="rows.taskRules.length" note="每日任务 + 成长任务" tone="primary" />
+            <AdminStatCard label="完成记录" :value="rows.userTasks.filter((item) => item.status === 'completed').length" note="用户任务完成统计" tone="success" />
+            <AdminStatCard label="每日任务" :value="rows.taskRules.filter((item) => item.type === 'daily').length" note="活跃留存入口" tone="gold" />
+          </div>
+          <div class="card admin-table-card">
+            <table class="admin-table">
+              <thead>
+                <tr><th>任务</th><th>类型</th><th>奖励</th><th>动作标识</th><th>状态</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="task in rows.taskRules" :key="task.id">
+                  <td><strong>{{ task.title }}</strong><small>{{ task.description }}</small></td>
+                  <td>{{ task.type === 'daily' ? '每日任务' : '成长任务' }}</td>
+                  <td>+{{ task.rewardPoints }} 积分</td>
+                  <td>{{ task.actionKey }}</td>
+                  <td><AdminStatusBadge :label="task.status === 'active' ? '启用' : '停用'" :type="task.status === 'active' ? 'success' : 'warning'" /></td>
+                  <td><button class="btn ghost" type="button" @click="openModal('编辑任务规则', '/api/admin/tasks', 'POST', taskRuleFields(task))">编辑</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="active === 'badges'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('创建勋章', '/api/admin/badges', 'POST', badgeFields())">创建勋章</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard label="勋章数量" :value="rows.badges.length" note="badges 配置" tone="primary" />
+            <AdminStatCard label="获得记录" :value="rows.userBadges.length" note="user_badges 记录" tone="success" />
+            <AdminStatCard label="启用勋章" :value="rows.badges.filter((item) => item.status !== 'disabled').length" note="前台可点亮" tone="gold" />
+          </div>
+          <div class="card admin-table-card">
+            <table class="admin-table">
+              <thead>
+                <tr><th>勋章</th><th>图标</th><th>规则</th><th>描述</th><th>状态</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="badge in rows.badges" :key="badge.id">
+                  <td><strong>{{ badge.name }}</strong><small>{{ badge.code }}</small></td>
+                  <td>{{ badge.icon }}</td>
+                  <td>{{ badge.rule }}</td>
+                  <td>{{ badge.description }}</td>
+                  <td><AdminStatusBadge :label="badge.status === 'active' ? '启用' : '停用'" :type="badge.status === 'active' ? 'success' : 'warning'" /></td>
+                  <td><button class="btn ghost" type="button" @click="openModal('编辑勋章', '/api/admin/badges', 'POST', badgeFields(badge))">编辑</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="active === 'invites'" class="section admin-module-page">
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard label="邀请记录" :value="rows.inviteRecords.length" note="invite_records" tone="primary" />
+            <AdminStatCard label="已转化" :value="rows.inviteRecords.filter((item) => item.status !== 'pending').length" note="注册或首单" tone="success" />
+            <AdminStatCard label="积分奖励" :value="rows.inviteRecords.reduce((sum, item) => sum + Number(item.rewardPoints || 0), 0)" note="邀请注册奖励" tone="gold" />
+          </div>
+          <div class="card admin-table-card">
+            <table class="admin-table">
+              <thead>
+                <tr><th>记录</th><th>邀请人</th><th>被邀请人</th><th>邀请码</th><th>状态</th><th>奖励</th><th>时间</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="record in rows.inviteRecords" :key="record.id">
+                  <td>#{{ record.id }}</td>
+                  <td>{{ record.inviterUserId }}</td>
+                  <td>{{ record.inviteeUserId || '-' }}</td>
+                  <td>{{ record.inviteCode }}</td>
+                  <td><AdminStatusBadge :label="record.status" type="success" /></td>
+                  <td>积分 {{ record.rewardPoints || 0 }} / 券 {{ record.rewardCouponId || '-' }}</td>
+                  <td>{{ record.convertedAt || record.createdAt }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="active === 'notificationPush'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('手动推送消息', '/api/admin/notifications', 'POST', notificationPushFields())">手动推送</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard label="发送量" :value="notificationStatsAdmin.total" note="notification_records" tone="primary" />
+            <AdminStatCard label="已读量" :value="notificationStatsAdmin.read" :note="`阅读率 ${notificationStatsAdmin.readRate || 0}%`" tone="success" />
+            <AdminStatCard label="未读量" :value="notificationStatsAdmin.unread" note="待用户触达" tone="warning" />
+            <AdminStatCard label="点击率" :value="`${notificationStatsAdmin.clickRate || 0}%`" note="按消息点击记录统计" tone="gold" />
+          </div>
+          <div class="cockpit-grid">
+            <AdminChartCard title="按类型统计" description="活动、预约、订单、任务、优惠券和成长消息触达效果">
+              <div class="admin-ratio-list">
+                <div v-for="item in notificationStatsAdmin.byType || []" :key="item.type" class="rank-row">
+                  <span>{{ item.type }}</span>
+                  <div class="mini-progress"><i :style="{ width: `${Math.min(100, item.readRate || 0)}%` }"></i></div>
+                  <b>{{ item.sent }} / {{ item.readRate }}%</b>
+                </div>
+                <p v-if="!(notificationStatsAdmin.byType || []).length" class="muted">暂无消息统计</p>
+              </div>
+            </AdminChartCard>
+            <div class="card admin-table-card">
+              <table class="admin-table">
+                <thead>
+                  <tr><th>消息</th><th>用户</th><th>类型</th><th>状态</th><th>来源</th><th>优先级</th><th>时间</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in rows.notificationRecords.slice(0, 12)" :key="item.id">
+                    <td><strong>{{ item.title }}</strong><small>{{ item.content }}</small></td>
+                    <td>{{ item.userId || '全体' }}</td>
+                    <td>{{ item.type }}</td>
+                    <td><AdminStatusBadge :label="item.isRead || item.status === 'read' ? '已读' : '未读'" :type="item.isRead || item.status === 'read' ? 'success' : 'warning'" /></td>
+                    <td>{{ item.source }}</td>
+                    <td><AdminStatusBadge :label="item.priority === 'high' ? '高' : '普通'" :type="item.priority === 'high' ? 'danger' : 'default'" /></td>
+                    <td>{{ item.createdAt }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="active === 'announcements'" class="section admin-module-page">
+          <div class="admin-module-actions">
+            <button class="btn" type="button" @click="openModal('新增系统公告', '/api/admin/announcements', 'POST', announcementFields())">新增公告</button>
+          </div>
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard label="公告数量" :value="rows.announcements.length" note="announcements" tone="primary" />
+            <AdminStatCard label="已发布" :value="rows.announcements.filter((item) => item.status === 'published').length" note="发布后自动触达全体用户" tone="success" />
+            <AdminStatCard label="置顶公告" :value="rows.announcements.filter((item) => item.pinned).length" note="高优先级展示" tone="gold" />
+          </div>
+          <div class="card admin-table-card">
+            <table class="admin-table">
+              <thead>
+                <tr><th>公告</th><th>链接</th><th>置顶</th><th>状态</th><th>更新时间</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in rows.announcements" :key="item.id">
+                  <td><strong>{{ item.title }}</strong><small>{{ item.content }}</small></td>
+                  <td>{{ item.link || '-' }}</td>
+                  <td><AdminStatusBadge :label="item.pinned ? '置顶' : '普通'" :type="item.pinned ? 'danger' : 'default'" /></td>
+                  <td><AdminStatusBadge :label="item.status === 'published' ? '发布' : '草稿'" :type="item.status === 'published' ? 'success' : 'warning'" /></td>
+                  <td>{{ item.updatedAt || item.createdAt }}</td>
+                  <td>
+                    <div class="actions">
+                      <button class="btn ghost" type="button" @click="openModal('编辑系统公告', `/api/admin/announcements/${item.id}`, 'PUT', announcementFields(item))">编辑</button>
+                      <button class="btn danger" type="button" @click="remove(`/api/admin/announcements/${item.id}`)">删除</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="active === 'business'" class="section admin-module-page cockpit-page">
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in businessStats" :key="item.label" v-bind="item" />
+          </div>
+
+          <div class="cockpit-grid">
+            <AdminChartCard title="用户增长趋势" description="DAU、新增用户与活跃用户的最近趋势">
+              <div class="admin-line-chart compact">
+                <div
+                  v-for="item in businessTrends"
+                  :key="`user-${item.date}`"
+                  class="admin-line-chart__bar"
+                  :style="{ height: barWidth(item.activeUsers, maxOf(businessTrends, 'activeUsers')) }"
+                >
+                  <span>{{ item.activeUsers }}</span>
+                  <small>{{ item.label }}</small>
+                </div>
+              </div>
+              <div class="mini-bars">
+                <div v-for="item in businessTrends.slice(-5)" :key="`new-${item.date}`" class="bar-row">
+                  <span>{{ item.label }}</span>
+                  <div class="bar-track"><i :style="{ width: barWidth(item.newUsers, maxOf(businessTrends, 'newUsers')) }"></i></div>
+                  <strong>+{{ item.newUsers }}</strong>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="收入趋势" description="GMV 与已支付收入走势">
+              <div class="mini-bars">
+                <div v-for="item in businessTrends" :key="`revenue-${item.date}`" class="bar-row">
+                  <span>{{ item.label }}</span>
+                  <div class="bar-track"><i :style="{ width: barWidth(item.revenue, maxOf(businessTrends, 'revenue')) }"></i></div>
+                  <strong>{{ money(item.revenue) }}</strong>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="订单转化漏斗" description="从下单到支付完成的转化链路">
+              <div class="admin-ratio-list">
+                <div v-for="item in businessFunnel.order" :key="item.label" class="rank-row">
+                  <span>{{ item.label }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.value, maxOf(businessFunnel.order, 'value')) }"></i></div>
+                  <b>{{ item.value }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="活动转化漏斗" description="曝光、报名、到场的活动运营效率">
+              <div class="admin-ratio-list">
+                <div v-for="item in businessFunnel.activity" :key="item.label" class="rank-row">
+                  <span>{{ item.label }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.value, maxOf(businessFunnel.activity, 'value')) }"></i></div>
+                  <b>{{ item.value }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="会员等级分布" description="Lv1-Lv5 会员规模与成长结构">
+              <div class="admin-ratio-list">
+                <div v-for="item in businessMembers.distribution" :key="item.code || item.name" class="rank-row">
+                  <span>{{ item.name }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.count, maxOf(businessMembers.distribution, 'count')) }"></i></div>
+                  <b>{{ item.count }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="推荐转化" description="推荐曝光、点击与转化效果">
+              <div class="admin-stat-grid admin-stat-grid--compact">
+                <AdminStatCard label="推荐曝光" :value="businessRecommendations.exposure || 0" note="recommend_records" tone="primary" />
+                <AdminStatCard label="推荐点击" :value="businessRecommendations.clicks || 0" :note="`点击率 ${businessRecommendations.clickRate || 0}%`" tone="success" />
+                <AdminStatCard label="推荐转化" :value="businessRecommendations.conversions || 0" :note="`转化率 ${businessRecommendations.conversionRate || 0}%`" tone="gold" />
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="热门商品排行" description="按销量和销售额聚合">
+              <div class="admin-ranking-list">
+                <article v-for="(item, index) in businessRankings.products" :key="item.id || item.name">
+                  <span>{{ index + 1 }}</span>
+                  <div><strong>{{ item.name }}</strong><small>销售额 {{ money(item.total) }}</small></div>
+                  <b>{{ item.quantity }}</b>
+                </article>
+                <p v-if="!businessRankings.products.length" class="muted">暂无商品销售数据</p>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="热门书籍排行" description="按浏览、收藏和借阅热度聚合">
+              <div class="admin-ratio-list">
+                <div v-for="item in businessRankings.books" :key="item.id || item.name" class="rank-row">
+                  <span>{{ item.name }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.score, maxOf(businessRankings.books, 'score')) }"></i></div>
+                  <b>{{ item.score }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="热门活动排行" description="按报名人数和活动热度聚合">
+              <div class="admin-ratio-list">
+                <div v-for="item in businessRankings.activities" :key="item.id || item.name" class="rank-row">
+                  <span>{{ item.name }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.signups, maxOf(businessRankings.activities, 'signups')) }"></i></div>
+                  <b>{{ item.signups }}</b>
+                </div>
+              </div>
+            </AdminChartCard>
+          </div>
+        </section>
+
+        <section v-if="active === 'operationsV2'" class="section admin-module-page cockpit-page">
+          <div class="admin-stat-grid admin-stat-grid--compact">
+            <AdminStatCard v-for="item in operationsStats" :key="item.label" v-bind="item" />
+          </div>
+
+          <div class="cockpit-grid">
+            <AdminChartCard title="KPI 配置与刷新" description="运营指标目标值与刷新频率配置">
+              <div class="admin-ratio-list">
+                <div v-for="item in operationsKpiConfigs" :key="item.code" class="rank-row">
+                  <span>{{ item.name }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.targetValue, maxOf(operationsKpiConfigs, 'targetValue')) }"></i></div>
+                  <b>{{ item.targetValue }} / {{ item.refreshInterval }}s</b>
+                </div>
+                <p v-if="!operationsKpiConfigs.length" class="muted">暂无 KPI 配置</p>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="活动转化分析" description="曝光、点击、报名、到场、复购链路">
+              <div class="admin-ratio-list">
+                <div v-for="item in operationsActivityFunnel.steps" :key="item.key" class="rank-row">
+                  <span>{{ item.label }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.value, maxOf(operationsActivityFunnel.steps, 'value')) }"></i></div>
+                  <b>{{ item.value }} · {{ item.totalRate }}%</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="用户分层分析" description="高价值、潜力、沉睡用户结构">
+              <div class="admin-ratio-list">
+                <div v-for="item in operationsUserSegmentation.segments" :key="item.name" class="rank-row">
+                  <span>{{ item.name }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.count, maxOf(operationsUserSegmentation.segments, 'count')) }"></i></div>
+                  <b>{{ item.count }} · {{ item.repeatRate }}%</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="商品复购分析" description="热销商品、购买频次与复购率">
+              <div class="admin-ranking-list">
+                <article v-for="(item, index) in operationsProductRepeat.products.slice(0, 6)" :key="item.id || item.name">
+                  <span>{{ index + 1 }}</span>
+                  <div><strong>{{ item.name }}</strong><small>复购率 {{ item.repeatRate }}% · 购买频次 {{ item.purchaseFrequency }}</small></div>
+                  <b>{{ item.quantity }}</b>
+                </article>
+                <p v-if="!operationsProductRepeat.products.length" class="muted">暂无商品复购数据</p>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="复购率趋势" description="最近 14 天复购率变化">
+              <div class="mini-bars">
+                <div v-for="item in operationsProductRepeat.trend" :key="item.date" class="bar-row">
+                  <span>{{ item.label }}</span>
+                  <div class="bar-track"><i :style="{ width: barWidth(item.repeatRate, 100) }"></i></div>
+                  <strong>{{ item.repeatRate }}%</strong>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="会员等级分析" description="用户数、消费占比和成长值分布">
+              <div class="admin-ratio-list">
+                <div v-for="item in operationsMemberAnalysis.levels" :key="item.code || item.name" class="rank-row">
+                  <span>{{ item.name }}</span>
+                  <div class="mini-progress"><i :style="{ width: barWidth(item.paidAmount, maxOf(operationsMemberAnalysis.levels, 'paidAmount')) }"></i></div>
+                  <b>{{ item.count }}人 · {{ item.consumptionShare }}%</b>
+                </div>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="活动热度排行" description="活动曝光、点击和报名表现">
+              <div class="admin-ranking-list">
+                <article v-for="(item, index) in operationsActivityFunnel.activities.slice(0, 6)" :key="item.id || item.name">
+                  <span>{{ index + 1 }}</span>
+                  <div><strong>{{ item.name }}</strong><small>曝光 {{ item.exposure }} · 点击 {{ item.click }}</small></div>
+                  <b>{{ item.applied }}</b>
+                </article>
+                <p v-if="!operationsActivityFunnel.activities.length" class="muted">暂无活动分析数据</p>
+              </div>
+            </AdminChartCard>
+
+            <AdminChartCard title="高价值用户明细" description="按消费额和活跃度排序">
+              <div class="admin-ranking-list">
+                <article v-for="(item, index) in operationsUserSegmentation.users.slice(0, 6)" :key="item.id">
+                  <span>{{ index + 1 }}</span>
+                  <div><strong>{{ item.name }}</strong><small>{{ item.segment }} · 活跃分 {{ item.activeScore }}</small></div>
+                  <b>{{ money(item.paidAmount) }}</b>
+                </article>
+                <p v-if="!operationsUserSegmentation.users.length" class="muted">暂无用户分层数据</p>
+              </div>
+            </AdminChartCard>
           </div>
         </section>
 

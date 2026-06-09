@@ -1,17 +1,23 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
+import { useEngagementStore } from "@/stores/engagement";
 import { useUserStore } from "@/stores/user";
 
+const engagementStore = useEngagementStore();
 const userStore = useUserStore();
 const message = ref("");
 const member = computed(() => userStore.member);
+const invite = computed(() => engagementStore.invite || {});
 const percent = computed(() => {
   const membership = member.value?.membership;
   if (!membership?.target) return 100;
   return Math.min(100, Math.round((membership.current / membership.target) * 100));
 });
 
-onMounted(() => userStore.fetchMember());
+onMounted(() => {
+  userStore.fetchMember();
+  engagementStore.fetchInvite().catch(() => {});
+});
 
 async function checkIn() {
   const data = await import("@/api").then(({ request }) => request("/api/member/check-in", { method: "POST", body: "{}" }));
@@ -33,12 +39,16 @@ async function checkIn() {
       </div>
       <div class="member-actions">
         <div class="metric"><span class="muted">可用积分</span><strong>{{ member.points }}</strong><span>可在积分中心兑换权益</span></div>
+        <div class="metric"><span class="muted">邀请码</span><strong>{{ invite.inviteCode || "-" }}</strong><span>邀请好友注册奖励积分</span></div>
         <button class="btn" type="button" :disabled="member.membership.checkedInToday" @click="checkIn">{{ member.membership.checkedInToday ? "今日已签到" : "今日签到" }}</button>
         <p v-if="message" class="toast-inline">{{ message }}</p>
       </div>
     </div>
     <div class="grid reward-grid member-shortcuts">
       <RouterLink class="card reward-card" to="/points"><h3>积分中心</h3><p class="muted">兑换咖啡券、折扣券和会员权益。</p></RouterLink>
+      <RouterLink class="card reward-card" to="/tasks"><h3>任务中心</h3><p class="muted">完成每日任务、成长任务和连续签到奖励。</p></RouterLink>
+      <RouterLink class="card reward-card" to="/invite"><h3>邀请有礼</h3><p class="muted">分享邀请码，邀请注册与首单获得奖励。</p></RouterLink>
+      <RouterLink class="card reward-card" to="/badges"><h3>勋章墙</h3><p class="muted">查看阅读、咖啡、活动和社区成就。</p></RouterLink>
       <RouterLink class="card reward-card" to="/gifts"><h3>我的礼品</h3><p class="muted">查看积分兑换后的礼券和核销状态。</p></RouterLink>
       <RouterLink class="card reward-card" to="/favorites"><h3>我的收藏</h3><p class="muted">保存喜欢的书籍、商品、活动和咖啡。</p></RouterLink>
       <RouterLink class="card reward-card" to="/notes"><h3>我的笔记</h3><p class="muted">记录阅读摘抄、课程要点和到店灵感。</p></RouterLink>

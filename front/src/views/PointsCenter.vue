@@ -4,8 +4,12 @@ import { request } from "@/api";
 import DataState from "@/components/DataState.vue";
 import BaseToast from "@/components/front/BaseToast.vue";
 import StatusBadge from "@/components/front/StatusBadge.vue";
+import { useCommercialStore } from "@/stores/commercial";
+import { useEngagementStore } from "@/stores/engagement";
 import { useUserStore } from "@/stores/user";
 
+const commercialStore = useCommercialStore();
+const engagementStore = useEngagementStore();
 const userStore = useUserStore();
 const loading = ref(false);
 const error = ref("");
@@ -15,6 +19,9 @@ const toastType = ref("success");
 
 const member = computed(() => userStore.member);
 const membership = computed(() => member.value?.membership || {});
+const memberCoupons = computed(() => commercialStore.unusedCoupons.slice(0, 3));
+const checkInSummary = computed(() => engagementStore.checkIn || {});
+const earnedBadges = computed(() => engagementStore.earnedBadges.slice(0, 4));
 const rewards = computed(() => membership.value.rewards || []);
 const pointValue = computed(() => (Number(member.value?.points || 0) / 10).toFixed(1));
 const annualPoints = computed(() => Math.max(Number(member.value?.points || 0), Number(membership.value.current || 0) * 2));
@@ -70,7 +77,13 @@ async function loadMember() {
   loading.value = true;
   error.value = "";
   try {
-    await userStore.fetchMember();
+    await Promise.allSettled([
+      userStore.fetchMember(),
+      commercialStore.fetchMemberLevel(),
+      commercialStore.fetchMemberCoupons(),
+      engagementStore.fetchTasks(),
+      engagementStore.fetchBadges()
+    ]);
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -99,6 +112,7 @@ function formatTime(value) {
 async function checkIn() {
   try {
     userStore.member = await request("/api/member/check-in", { method: "POST", body: "{}" });
+    await engagementStore.fetchTasks();
     showToast("签到成功，积分与成长值已更新");
   } catch (err) {
     showToast(err.message, "danger");
@@ -245,6 +259,76 @@ async function redeem(reward) {
                 <small>{{ benefit.desc }}</small>
               </div>
             </div>
+          </article>
+
+          <article class="card member-rights-card">
+            <h3>会员等级权益</h3>
+            <div class="points-rights-list">
+              <div>
+                <span>折</span>
+                <b>{{ Number((membership.discountRate || 1) * 10).toFixed(1) }} 折</b>
+                <small>下单时自动展示会员折扣</small>
+              </div>
+              <div>
+                <span>倍</span>
+                <b>{{ membership.pointsMultiplier || 1 }} 倍积分</b>
+                <small>支付确认后按倍率返积分</small>
+              </div>
+              <div>
+                <span>先</span>
+                <b>优先 {{ membership.activityPriority || 0 }} 次</b>
+                <small>热门活动优先报名权益</small>
+              </div>
+            </div>
+          </article>
+
+          <article class="card point-record-card">
+            <h3>我的优惠券</h3>
+            <div class="point-record-list">
+              <p v-for="coupon in memberCoupons" :key="coupon.userCouponId">
+                <span>
+                  <strong>{{ coupon.name }}</strong>
+                  <small>满 {{ coupon.threshold || 0 }} 可用 · {{ coupon.validTo }} 到期</small>
+                </span>
+                <b class="success">{{ coupon.type === "member_exclusive" && Number(coupon.value) < 1 ? `${Number(coupon.value * 10).toFixed(1)}折` : `￥${coupon.value}` }}</b>
+              </p>
+              <p v-if="!memberCoupons.length" class="muted">暂无可用优惠券</p>
+            </div>
+          </article>
+
+          <article class="card point-record-card">
+            <h3>连续签到</h3>
+            <div class="point-record-list">
+              <p>
+                <span>
+                  <strong>{{ checkInSummary.streak || 0 }} 天</strong>
+                  <small>{{ checkInSummary.checkedInToday ? "今日已签到" : "今日待签到" }}</small>
+                </span>
+                <b class="success">签到</b>
+              </p>
+              <p v-for="reward in (checkInSummary.rewards || []).slice(0, 3)" :key="reward.days">
+                <span>
+                  <strong>连续 {{ reward.label }}</strong>
+                  <small>奖励预览</small>
+                </span>
+                <b class="success">+{{ reward.points }}</b>
+              </p>
+            </div>
+          </article>
+
+          <article class="card point-record-card">
+            <h3>我的成就</h3>
+            <div class="point-record-list">
+              <p v-for="badge in earnedBadges" :key="badge.id">
+                <span>
+                  <strong>{{ badge.name }}</strong>
+                  <small>{{ badge.description }}</small>
+                </span>
+                <b class="success">已获得</b>
+              </p>
+              <p v-if="!earnedBadges.length" class="muted">完成任务后点亮成就</p>
+            </div>
+            <RouterLink class="btn ghost" to="/badges">查看勋章墙</RouterLink>
           </article>
 
           <article class="card point-record-card">
